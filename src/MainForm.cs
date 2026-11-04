@@ -17,6 +17,13 @@ namespace ModbusScan
         private CheckBox chkConvention;
         private Button btnConnect, btnDisconnect, btnRead, btnClear;
         private Label lblStatus, lblSummary;
+        private Label lblUpdate;
+        private Button btnCheckUpdate, btnUpdate;
+        private Timer updateTimer;
+        private Timer firstCheckTimer;
+        private UpdateInfo _updateInfo;
+        private bool _updateCheckRunning;
+        private bool _updateInstallRunning;
         private DataGridView grid;
 
         public MainForm()
@@ -146,8 +153,24 @@ namespace ModbusScan
             lblSummary.ForeColor = Color.DimGray;
             gbRead.Controls.Add(lblSummary);
 
+            lblUpdate = new Label();
+            lblUpdate.SetBounds(8, 201, 296, 16);
+            lblUpdate.Text = "Güncelleme: henüz denetlenmedi";
+            lblUpdate.ForeColor = Color.Gray;
+
+            btnCheckUpdate = new Button();
+            btnCheckUpdate.Text = "Denetle";
+            btnCheckUpdate.SetBounds(310, 196, 82, 25);
+            btnCheckUpdate.Click += OnCheckUpdate;
+
+            btnUpdate = new Button();
+            btnUpdate.Text = "Güncelle";
+            btnUpdate.SetBounds(396, 196, 96, 25);
+            btnUpdate.Enabled = false;
+            btnUpdate.Click += OnInstallUpdate;
+
             grid = new DataGridView();
-            grid.SetBounds(8, 198, 484, 274);
+            grid.SetBounds(8, 226, 484, 246);
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
@@ -177,6 +200,9 @@ namespace ModbusScan
 
             Controls.Add(gbConnection);
             Controls.Add(gbRead);
+            Controls.Add(lblUpdate);
+            Controls.Add(btnCheckUpdate);
+            Controls.Add(btnUpdate);
             Controls.Add(grid);
             Controls.Add(txtLog);
 
@@ -458,8 +484,171 @@ namespace ModbusScan
             txtLog.AppendText(DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) + "  " + message + Environment.NewLine);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+
+            updateTimer = new Timer();
+            updateTimer.Interval = 60000;
+            updateTimer.Tick += OnUpdateTimerTick;
+            updateTimer.Start();
+
+            firstCheckTimer = new Timer();
+            firstCheckTimer.Interval = 1200;
+            firstCheckTimer.Tick += OnFirstCheckTick;
+            firstCheckTimer.Start();
+        }
+
+        private void OnFirstCheckTick(object sender, EventArgs e)
+        {
+            firstCheckTimer.Stop();
+            StartUpdateCheck(false);
+        }
+
+        private void OnUpdateTimerTick(object sender, EventArgs e)
+        {
+            StartUpdateCheck(false);
+        }
+
+        private void OnCheckUpdate(object sender, EventArgs e)
+        {
+            StartUpdateCheck(true);
+        }
+
+        private void StartUpdateCheck(bool manual)
+        {
+            if (_updateCheckRunning || _updateInstallRunning) return;
+            _updateCheckRunning = true;
+            btnCheckUpdate.Enabled = false;
+            if (manual)
+            {
+                lblUpdate.Text = "Güncelleme denetleniyor…";
+                lblUpdate.ForeColor = Color.Gray;
+            }
+
+            System.Threading.Thread worker = new System.Threading.Thread(delegate()
+            {
+                string error;
+                UpdateInfo info = Updater.Check(Updater.CurrentVersion, out error);
+                Ui(delegate { FinishUpdateCheck(info, error, manual); });
+            });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        private void FinishUpdateCheck(UpdateInfo info, string error, bool manual)
+        {
+            _updateCheckRunning = false;
+            btnCheckUpdate.Enabled = !_updateInstallRunning;
+
+            if (info == null)
+            {
+                if (manual)
+                {
+                    lblUpdate.Text = "Denetlenemedi: " + error;
+                    lblUpdate.ForeColor = Color.Firebrick;
+                    Log("Güncelleme denetimi başarısız: " + error);
+                }
+                else if (_updateInfo == null)
+                {
+                    lblUpdate.Text = "Güncelleme denetlenemedi (" + error + ")";
+                    lblUpdate.ForeColor = Color.Gray;
+                }
+                return;
+            }
+
+            bool changed = _updateInfo == null || _updateInfo.Tag != info.Tag;
+            _updateInfo = info;
+
+            if (info.NewerAvailable)
+            {
+                btnUpdate.Enabled = !_updateInstallRunning;
+                btnUpdate.Text = info.AssetAvailable ? "Güncelle" : "Sayfayı aç";
+                lblUpdate.ForeColor = info.AssetAvailable ? Color.FromArgb(0, 128, 0) : Color.DarkOrange;
+                lblUpdate.Text = info.AssetAvailable
+                    ? "YENİ sürüm var: " + info.Tag + " (" + Updater.FormatSize(info.SizeBytes) + ")"
+                    : "Yeni sürüm " + info.Tag + " ama hazır exe yok";
+                if (changed || manual) Log("GitHub'da yeni sürüm: " + info.Tag);
+            }
+            else
+            {
+                btnUpdate.Enabled = false;
+                btnUpdate.Text = "Güncelle";
+                lblUpdate.ForeColor = Color.Gray;
+                lblUpdate.Text = "Güncel: v" + Updater.CurrentVersion.ToString(3) +
+                                 " · son kontrol " + DateTime.Now.ToString("HH:mm", CultureInfo.InvariantCulture);
+                if (manual) Log("Güncelleme yok, en yeni sürüm " + info.Tag);
+            }
+        }
+
+        private void OnInstallUpdate(object sender, EventArgs e)
+        {
+            if (_updateInfo == null || _updateInstallRunning) return;
+
+            if (!_updateInfo.AssetAvailable)
+            {
+                try { Updater.OpenUrl(_updateInfo.ReleasePage); }
+                catch (Exception ex) { Log("Tarayıcı açılamadı: " + ex.Message); }
+                return;
+            }
+
+            _updateInstallRunning = true;
+            btnUpdate.Enabled = false;
+            btnCheckUpdate.Enabled = false;
+            lblUpdate.Text = "Güncelleme hazırlanıyor…";
+            lblUpdate.ForeColor = Color.Gray;
+
+            UpdateInfo info = _updateInfo;
+            string exePath = Application.ExecutablePath;
+
+            System.Threading.Thread worker = new System.Threading.Thread(delegate()
+            {
+                string error;
+                bool ok = Updater.TryInstall(info, exePath,
+                    delegate(string status) { Ui(delegate { lblUpdate.Text = status; }); },
+                    out error);
+                Ui(delegate { FinishInstall(ok, error); });
+            });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        private void FinishInstall(bool ok, string error)
+        {
+            if (ok)
+            {
+                lblUpdate.Text = "İndirildi, program kapanıyor…";
+                lblUpdate.ForeColor = Color.FromArgb(0, 128, 0);
+                Log("Güncelleme indirildi; değişim betiği başlatıldı, program kapanıyor.");
+                Close();
+                return;
+            }
+
+            _updateInstallRunning = false;
+            btnCheckUpdate.Enabled = true;
+            btnUpdate.Enabled = true;
+            lblUpdate.Text = "Güncelleme başarısız: " + error;
+            lblUpdate.ForeColor = Color.Firebrick;
+            Log("Güncelleme başarısız: " + error);
+        }
+
+        private void Ui(Action action)
+        {
+            // Arka plan işi ile pencere kapanışı yarısabilir; bu durumda sessizce yoksay.
+            try
+            {
+                if (IsHandleCreated) BeginInvoke(action);
+                else action();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (updateTimer != null) updateTimer.Stop();
+            if (firstCheckTimer != null) firstCheckTimer.Stop();
             _client.Close();
             base.OnFormClosing(e);
         }

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set VERSION=0.1.0
+set VERSION=0.2.0
 set CSC=C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 if not exist "%CSC%" set CSC=C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe
 if not exist "%CSC%" (
@@ -16,14 +16,14 @@ echo [1/3] ModbusScan.exe derleniyor...
 "%CSC%" /nologo /target:winexe /optimize+ /platform:anycpu ^
   /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll ^
   /out:dist\ModbusScan.exe ^
-  src\ModbusTcp.cs src\MainForm.cs src\Program.cs
+  src\ModbusTcp.cs src\Updater.cs src\MainForm.cs src\Program.cs
 if errorlevel 1 exit /b 1
 
 echo [2/3] SelfTest.exe (kendi kendine test) derleniyor...
 "%CSC%" /nologo /target:exe /optimize+ ^
   /reference:System.dll ^
   /out:dist\SelfTest.exe ^
-  src\ModbusTcp.cs tools\SelfTest.cs
+  src\ModbusTcp.cs src\Updater.cs tools\SelfTest.cs
 if errorlevel 1 exit /b 1
 
 echo [3/3] Probe.exe (test araci) derleniyor...

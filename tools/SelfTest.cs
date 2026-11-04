@@ -28,6 +28,8 @@ internal static class SelfTest
 
     private static int Main()
     {
+        UpdaterChecks();
+
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Thread server = new Thread(ServerLoop);
@@ -85,6 +87,51 @@ internal static class SelfTest
         _listener.Stop();
         Console.WriteLine("SONUC: " + _failures + " hata");
         return _failures == 0 ? 0 : 1;
+    }
+
+    private static void UpdaterChecks()
+    {
+        Check("ParseTag v0.2.0", Updater.ParseTag("v0.2.0") == new Version(0, 2, 0),
+              "got " + Updater.ParseTag("v0.2.0"));
+        Check("ParseTag onay v'siz", Updater.ParseTag("0.2.0") == new Version(0, 2, 0),
+              "got " + Updater.ParseTag("0.2.0"));
+        Check("ParseTag gecersiz etiket null", Updater.ParseTag("v-taslak") == null, "null degil");
+        Check("ParseTag bos null", Updater.ParseTag("") == null && Updater.ParseTag(null) == null, "null degil");
+
+        Check("TagFromLocation 302 hedefi",
+              Updater.TagFromLocation("https://github.com/dincer552/modbus_scan/releases/tag/v0.2.0") == "v0.2.0",
+              "got " + Updater.TagFromLocation("https://github.com/dincer552/modbus_scan/releases/tag/v0.2.0"));
+        Check("TagFromLocation sorgu parametresini atlar",
+              Updater.TagFromLocation("https://github.com/x/y/releases/tag/v1.10.2?foo=1") == "v1.10.2",
+              "got " + Updater.TagFromLocation("https://github.com/x/y/releases/tag/v1.10.2?foo=1"));
+        Check("TagFromLocation etiket yoksa null",
+              Updater.TagFromLocation("https://github.com/x/y/releases") == null && Updater.TagFromLocation(null) == null,
+              "null degil");
+
+        Check("AssetName", Updater.AssetName("v0.2.0") == "ModbusScan-v0.2.0.exe", "got " + Updater.AssetName("v0.2.0"));
+        Check("DownloadUrlFor",
+              Updater.DownloadUrlFor("v0.2.0") == "https://github.com/dincer552/modbus_scan/releases/download/v0.2.0/ModbusScan-v0.2.0.exe",
+              "got " + Updater.DownloadUrlFor("v0.2.0"));
+        Check("ReleasePageFor",
+              Updater.ReleasePageFor("v0.2.0") == "https://github.com/dincer552/modbus_scan/releases/tag/v0.2.0",
+              "got " + Updater.ReleasePageFor("v0.2.0"));
+        Check("LatestReleaseUrl yonlendirme ucu",
+              Updater.LatestReleaseUrl == "https://github.com/dincer552/modbus_scan/releases/latest",
+              "got " + Updater.LatestReleaseUrl);
+
+        Check("IsNewer 0.1.1 -> 0.2.0 yeni", Updater.IsNewer(new Version(0, 1, 1), new Version(0, 2, 0)), "yanlis");
+        Check("IsNewer ayni sürüm degil", !Updater.IsNewer(new Version(0, 2, 0), new Version(0, 2, 0)), "yanlis");
+        Check("IsNewer geriye dusmez", !Updater.IsNewer(new Version(0, 2, 0), new Version(0, 1, 9)), "yanlis");
+        Check("IsNewer yama numarasini da karsilastirir", Updater.IsNewer(new Version(0, 2, 0), new Version(0, 2, 1)), "yanlis");
+        Check("IsNewer null latest -> false", !Updater.IsNewer(new Version(0, 2, 0), null), "yanlis");
+
+        Check("FormatSize bilinmiyor", Updater.FormatSize(0) == "bilinmiyor", "got " + Updater.FormatSize(0));
+        Check("FormatSize bayt", Updater.FormatSize(512) == "512 B", "got " + Updater.FormatSize(512));
+        Check("FormatSize KB", Updater.FormatSize(2048) == "2 KB", "got " + Updater.FormatSize(2048));
+        Check("FormatSize MB", Updater.FormatSize(1572864) == "1.50 MB", "got " + Updater.FormatSize(1572864));
+
+        Check("CurrentVersion okunabiliyor", Updater.CurrentVersion != null && Updater.CurrentVersion.Major == 0,
+              "got " + Updater.CurrentVersion);
     }
 
     private static byte[] ReadBytes(NetworkStream s, int count)
