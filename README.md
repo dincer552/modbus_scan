@@ -31,11 +31,19 @@ Windows'ta gelen C# derleyicisini kullanır, SDK gerekmez:
 build.bat
 ```
 
-Çıktı: `dist\ModbusScan.exe` (GUI) ve `dist\Probe.exe` (konsol test aracı).
+Çıktı: `dist\ModbusScan.exe` (GUI), `dist\SelfTest.exe` (kendi kendine test) ve `dist\Probe.exe` (konsol okuma aracı).
 
 ### Testler
 
-Gerçek cihaz yokken protokolü doğrulamak için sahte bir Modbus TCP sunucusu var:
+Soket seviyesindeki testler harici sunucu gerektirmez — kendi process'i içinde loopback sunucusu açar:
+
+```bat
+dist\SelfTest.exe
+```
+
+Bu araç MBAP çerçevelemesini (transaction/unit id, big-endian adres/adet), dört fonksiyon kodunun yanıtını, `uint16/int16/float32/uint32` çözümlerini, kelime sırasını, Modbus exception'ını ve byte count tutarsızlığını doğrular.
+
+Gerçek cihaz yokken arayüzü ve tam yığınını denemek için sahte Modbus TCP sunucusu:
 
 ```powershell
 # 1. terminal
@@ -52,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 
 ### CI
 
-`v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, smoke testleri koşar ve exe'yi release asset olarak yayınlar:
+`v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, `SelfTest.exe`'yi koşar ve exe'yi release asset olarak yayınlar:
 
 ```bash
 git tag v0.1.1
@@ -66,7 +74,8 @@ git push origin v0.1.1
 | `src/ModbusTcp.cs` | MBAP başlığı + PDU kurulumu, okuma/yazma, veri çözme (hex, uint, int, float, kelime sırası) |
 | `src/MainForm.cs` | 500 × 600 px pencere, bağlantı ve okuma alanları, sonuç tablosu, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
-| `tools/Probe.cs` | Konsol okuma aracı (CI smoke testi bunu kullanır) |
+| `tools/SelfTest.cs` | Loopback sunucu ile soket seviyesinde kendi kendine test (CI bunu koşar) |
+| `tools/Probe.cs` | Konsol okuma aracı |
 | `tools/FakeServer.ps1` | Sahte Modbus TCP sunucusu |
 | `tools/GuiTest.ps1` | Arayüz mantığını yansıtma ile test eden betik |
 

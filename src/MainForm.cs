@@ -27,7 +27,7 @@ namespace ModbusScan
 
         private void BuildUi()
         {
-            Text = "Modbus TCP Test v0.1";
+            Text = "Modbus TCP Test v" + typeof(Program).Assembly.GetName().Version.ToString(3);
             ClientSize = new Size(500, 600);
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;

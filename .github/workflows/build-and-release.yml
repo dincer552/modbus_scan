@@ -21,38 +21,9 @@ jobs:
         shell: cmd
         run: build.bat
 
-      - name: Smoke test (sahte Modbus TCP sunucusu + Probe)
-        shell: powershell
-        run: |
-          $server = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','tools\FakeServer.ps1','-Port','5020' `
-            -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            for ($i = 0; $i -lt 20; $i++) {
-              Start-Sleep -Milliseconds 500
-              if (Get-NetTCPConnection -LocalPort 5020 -State Listen -ErrorAction SilentlyContinue) { $ready = $true; break }
-            }
-            if (-not $ready) { throw "Test sunucusu 10 sn icinde dinlemedi." }
-
-            $r = & dist\Probe.exe --port 5020 --fc 3 --addr 0 --qty 10 2>&1 | Out-String
-            if ($r -notmatch 'data=20 bytes') { throw "FC03 beklenmedik: $r" }
-            if ($r -notmatch 'reg\[2\] u=65535 i=-1') { throw "int16 cozumleme hatali: $r" }
-
-            $f = & dist\Probe.exe --port 5020 --fc 3 --addr 0 --qty 2 2>&1 | Out-String
-            if ($f -notmatch 'float\(ABCD\)=3.140') { throw "float cozumleme hatali: $f" }
-
-            $c = & dist\Probe.exe --port 5020 --fc 1 --addr 0 --qty 12 2>&1 | Out-String
-            if ($c -notmatch 'bits=1 0 0 1 0 0 1 0 0 1 0 0') { throw "coil cozumleme hatali: $c" }
-
-            $e = & dist\Probe.exe --port 5020 --fc 3 --addr 9000 --qty 1 2>&1 | Out-String
-            if ($LASTEXITCODE -eq 0) { throw "exception yolu hata vermedi: $e" }
-            if ($e -notmatch 'ILLEGAL DATA ADDRESS') { throw "exception kodu hatali: $e" }
-
-            Write-Host 'Smoke test gecti.'
-          } finally {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
-          }
+      - name: Kendi kendine test (MBAP cerceveleme + cozumleme + hata yollari)
+        shell: cmd
+        run: dist\SelfTest.exe
 
       - name: Release asset hazirla
         shell: pwsh
