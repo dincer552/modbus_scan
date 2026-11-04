@@ -33,6 +33,7 @@ internal static class SelfTest
         UpdaterChecks();
         CodecChecks();
         RtuFrameChecks();
+        PortLabelChecks();
         RtuStackChecks();
 
         _listener = new TcpListener(IPAddress.Loopback, 0);
@@ -194,6 +195,33 @@ internal static class SelfTest
               ModbusRtuClient.StopLetter(StopBits.OnePointFive) == "1.5" &&
               ModbusRtuClient.ParityLetter(Parity.Odd) == "O",
               "got " + ModbusRtuClient.FormatSettings("COM1", 19200, Parity.Even, 8, StopBits.Two));
+    }
+
+    /// <summary>COM port listesinde portun yaninda yazan aciklama metni (WMI caption) islemi.</summary>
+    private static void PortLabelChecks()
+    {
+        Check("PortNameOf COM14", SerialPortInfo.PortNameOf("USB Serial Port (COM14)") == "COM14",
+              "got " + SerialPortInfo.PortNameOf("USB Serial Port (COM14)"));
+        Check("PortNameOf kucuk harf", SerialPortInfo.PortNameOf("Bluetooth Link (com9)") == "COM9",
+              "got " + SerialPortInfo.PortNameOf("Bluetooth Link (com9)"));
+        Check("PortNameOf parantez yoksa null", SerialPortInfo.PortNameOf("COM5") == null, "null degil");
+        Check("PortNameOf rakam yoksa null", SerialPortInfo.PortNameOf("Paralel (COM)") == null, "null degil");
+        Check("PortNameOf kapanis yoksa null", SerialPortInfo.PortNameOf("Port (COM12") == null, "null degil");
+
+        Check("StripPortSuffix onden kirpilir",
+              SerialPortInfo.StripPortSuffix("USB-SERIAL Ch A (COM14)", "COM14") == "USB-SERIAL Ch A",
+              "got " + SerialPortInfo.StripPortSuffix("USB-SERIAL Ch A (COM14)", "COM14"));
+        Check("StripPortSuffix sondan kirpilir",
+              SerialPortInfo.StripPortSuffix("(COM3) USB Serial Converter", "COM3") == "USB Serial Converter",
+              "got " + SerialPortInfo.StripPortSuffix("(COM3) USB Serial Converter", "COM3"));
+        Check("StripPortSuffix aciklama yoksa bos",
+              SerialPortInfo.StripPortSuffix("(COM3)", "COM3") == "",
+              "got " + SerialPortInfo.StripPortSuffix("(COM3)", "COM3"));
+        Check("StripPortSuffix caption yoksa degismeden",
+              SerialPortInfo.StripPortSuffix("Paralel Port", "COM1") == "Paralel Port", "degisti");
+
+        Dictionary<string, string> described = SerialPortInfo.Describe();
+        Check("Describe hata vermeden sozluk dondurur", described != null, "null");
     }
 
     /// <summary>Tam RTU yiginini sahte seri akis uzerinden kosar: okuma, yazma, exception, CRC, zaman asimi.</summary>

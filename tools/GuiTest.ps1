@@ -442,6 +442,20 @@ Assert ((Get-Field $serial 'cmbSerialPort').Items.Count -eq $realPorts) 'COM por
     ("liste={0} sistem={1}" -f (Get-Field $serial 'cmbSerialPort').Items.Count, $realPorts)
 
 $cmbPorts = Get-Field $serial 'cmbSerialPort'
+# Acilir listede port adinin yanina surucu aciklamasi cizilir; saklanan deger yine sadece COM adi.
+$portItems = @($cmbPorts.Items | ForEach-Object { [string]$_ })
+$plainNames = @($portItems | Where-Object { $_ -notmatch '^COM\d+$' }).Count
+Assert ($cmbPorts.DrawMode -eq 'OwnerDrawFixed') 'COM listesi owner-draw modunda' $cmbPorts.DrawMode
+Assert ($plainNames -eq 0) 'COM listesi yalnizca port adlarini saklar' ($portItems -join ',')
+Assert ($cmbPorts.DropDownWidth -ge $cmbPorts.Width) 'acilir liste kutudan dar degil' `
+    ("aciklik={0} kutu={1}" -f $cmbPorts.DropDownWidth, $cmbPorts.Width)
+$portLabels = Get-Field $serial '_portLabels'
+$staleLabels = @($portLabels.Keys | Where-Object { $portItems -notcontains $_ }).Count
+Assert ($staleLabels -eq 0 -and $portLabels.Count -le $portItems.Count) 'port açiklamalari mevcut listeyle sinirli' `
+    ("etiket={0} liste={1} bayat={2}" -f $portLabels.Count, $portItems.Count, $staleLabels)
+if ($portItems.Count -gt 0) {
+    Assert ([string]$cmbPorts.Text -match '^COM\d+$') 'secili port kutuda sade COM adi olarak duruyor' $cmbPorts.Text
+}
 $cmbPorts.SelectedIndex = -1
 Invoke-Handler $serial 'OnConnect'
 $serLog = [string](Get-Field $serial 'txtLog').Text

@@ -41,6 +41,7 @@ jobs:
             **Indir:** `ModbusScan-${{ github.ref_name }}.exe`
 
             Baglanti kutusunun basligindan TCP ya da RS485 sec: TCP'de IP/Port, RS485'te COM port, baud, parite, durdurma biti ve cihaz adresi sorulur.
+            RS485'te COM listesini actiginda her portun yaninda Windows'taki adi yazar (orn. COM14 USB-SERIAL Ch A), boylece donusturucunu kolayca bulursun.
             Okuma: FC01/02/03/04. Yazma: FC05/FC06/FC16 - tabloda bir hucreye cift tiklayarak.
             Kayitlara isim verebilirsin: Tanim sutununa yaz veya Excel'de kopyaladigin sutunu Ctrl+V ile yapistir.
             Ayrinti icin README.md.

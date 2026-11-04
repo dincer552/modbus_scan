@@ -32,6 +32,8 @@ namespace ModbusScan
         private bool _updateInstallRunning;
         private DataGridView grid;
         private readonly Dictionary<string, string> _definitions = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> _portLabels = new Dictionary<string, string>();
+        private string _portLabelKey = "";
 
         public MainForm()
         {
@@ -93,25 +95,29 @@ namespace ModbusScan
             lblCom = MakeLabel("COM", 10, 28);
             cmbSerialPort = new ComboBox();
             cmbSerialPort.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbSerialPort.SetBounds(42, 25, 58, 22);
+            cmbSerialPort.SetBounds(42, 25, 68, 22);
+            // Açılır listede port adının sağına sürücü açıklaması yazılır (COM14 = USB-SERIAL Ch A).
+            cmbSerialPort.DrawMode = DrawMode.OwnerDrawFixed;
+            cmbSerialPort.ItemHeight = 16;
+            cmbSerialPort.DrawItem += OnPortDrawItem;
             // Listeyi açtıkca yeniden sorgula: dönüştürücü takılıp çıkarılabiliyor.
             cmbSerialPort.DropDown += delegate { RefreshPorts(); };
-            lblBaud = MakeLabel("Hz", 104, 28);
+            lblBaud = MakeLabel("Hz", 114, 28);
             cmbBaud = new ComboBox();
             cmbBaud.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbBaud.SetBounds(120, 25, 54, 22);
+            cmbBaud.SetBounds(130, 25, 54, 22);
             cmbBaud.Items.AddRange(new object[] { "1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200" });
             cmbBaud.SelectedIndex = 3;
-            lblParity = MakeLabel("Par", 178, 28);
+            lblParity = MakeLabel("Par", 188, 28);
             cmbParity = new ComboBox();
             cmbParity.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbParity.SetBounds(202, 25, 50, 22);
+            cmbParity.SetBounds(212, 25, 50, 22);
             cmbParity.Items.AddRange(new object[] { "Yok", "Tek", "Çift" });
             cmbParity.SelectedIndex = 0;
-            lblStop = MakeLabel("Dur", 256, 28);
+            lblStop = MakeLabel("Dur", 266, 28);
             cmbStop = new ComboBox();
             cmbStop.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbStop.SetBounds(280, 25, 40, 22);
+            cmbStop.SetBounds(290, 25, 40, 22);
             cmbStop.Items.AddRange(new object[] { "1", "1.5", "2" });
             cmbStop.SelectedIndex = 0;
             gbConnection.Controls.Add(lblCom);
@@ -368,10 +374,10 @@ namespace ModbusScan
             if (rtu)
             {
                 // Seri alanlar tek satıra sığsın diye Bağlan/Kes başlık satırına çıkar.
-                lblUnit.Location = new Point(326, 28);
-                txtUnit.SetBounds(342, 25, 30, 21);
-                lblMs.Location = new Point(378, 28);
-                txtTimeout.SetBounds(398, 25, 40, 21);
+                lblUnit.Location = new Point(336, 28);
+                txtUnit.SetBounds(352, 25, 30, 21);
+                lblMs.Location = new Point(388, 28);
+                txtTimeout.SetBounds(408, 25, 40, 21);
                 btnConnect.SetBounds(314, 1, 74, 21);
                 btnDisconnect.SetBounds(392, 1, 78, 21);
                 RefreshPorts();
@@ -425,6 +431,7 @@ namespace ModbusScan
             });
 
             string previous = cmbSerialPort.Text;
+            FillPortLabels(names);
             cmbSerialPort.BeginUpdate();
             cmbSerialPort.Items.Clear();
             for (int i = 0; i < names.Length; i++) cmbSerialPort.Items.Add(names[i]);
@@ -437,6 +444,63 @@ namespace ModbusScan
             }
             int keep = previous.Length > 0 ? Array.IndexOf(names, previous) : -1;
             cmbSerialPort.SelectedIndex = keep >= 0 ? keep : 0;
+        }
+
+        /// <summary>Port listesi değiştiyse açıklamaları (sürücü adları) yeniden sorgular.</summary>
+        private void FillPortLabels(string[] names)
+        {
+            StringBuilder key = new StringBuilder();
+            for (int i = 0; i < names.Length; i++) key.Append(names[i]).Append(';');
+            if (key.ToString() == _portLabelKey) return;
+            _portLabelKey = key.ToString();
+            _portLabels.Clear();
+            if (names.Length == 0) return;
+
+            Dictionary<string, string> found = SerialPortInfo.Describe();
+            for (int i = 0; i < names.Length; i++)
+            {
+                string label;
+                if (found.TryGetValue(names[i], out label)) _portLabels[names[i]] = label;
+            }
+
+            int width = cmbSerialPort.Width;
+            for (int i = 0; i < names.Length; i++)
+            {
+                string label;
+                if (!_portLabels.TryGetValue(names[i], out label)) label = "";
+                Size measured = TextRenderer.MeasureText(names[i] + "   " + label, cmbSerialPort.Font,
+                    Size.Empty, TextFormatFlags.NoPrefix);
+                if (measured.Width + 24 > width) width = measured.Width + 24;
+            }
+            cmbSerialPort.DropDownWidth = width > 320 ? 320 : width;
+        }
+
+        private void OnPortDrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            string name = Convert.ToString(cmbSerialPort.Items[e.Index]);
+            string label;
+            if (!_portLabels.TryGetValue(name, out label)) label = "";
+            bool selected = (e.State & DrawItemState.Selected) != 0;
+            bool editBox = (e.State & DrawItemState.ComboBoxEdit) != 0;
+
+            e.DrawBackground();
+            Color textColor = selected ? SystemColors.HighlightText : SystemColors.WindowText;
+            TextRenderer.DrawText(e.Graphics, name, cmbSerialPort.Font, e.Bounds, textColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+            // Kutu kapalıyken yer dar; açıklama yalnızca açılır listede yazılır.
+            if (!editBox && label.Length > 0)
+            {
+                int nameWidth = TextRenderer.MeasureText(name, cmbSerialPort.Font, Size.Empty,
+                    TextFormatFlags.NoPrefix).Width;
+                Rectangle tail = new Rectangle(e.Bounds.X + nameWidth + 8, e.Bounds.Y,
+                    e.Bounds.Width - nameWidth - 10, e.Bounds.Height);
+                Color labelColor = selected ? Color.FromArgb(215, 228, 255) : Color.Gray;
+                TextRenderer.DrawText(e.Graphics, label, cmbSerialPort.Font, tail, labelColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
+            e.DrawFocusRectangle();
         }
 
         private static int PortNumber(string name)

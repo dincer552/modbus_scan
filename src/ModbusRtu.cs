@@ -1,9 +1,82 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
+using System.Management;
 
 namespace ModbusScan
 {
+    /// <summary>
+    /// COM portlarının Windows'ta görünen sürücü açıklamalarını sorgular, böylece listede
+    /// "COM14" yerine "COM14  USB-SERIAL Ch A" yazabilir.
+    /// </summary>
+    public static class SerialPortInfo
+    {
+        /// <summary>Port adı → açıklama. WMI kapalıysa veya eşleşme yoksa boş sözlük döner.</summary>
+        public static Dictionary<string, string> Describe()
+        {
+            Dictionary<string, string> result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(
+                    "SELECT Caption, Name FROM Win32_PnPEntity WHERE Caption LIKE '%(COM%'");
+                using (ManagementObjectCollection rows = searcher.Get())
+                {
+                    foreach (ManagementObject row in rows)
+                    {
+                        string caption = Text(row["Caption"]);
+                        if (caption.Length == 0) caption = Text(row["Name"]);
+                        string port = PortNameOf(caption);
+                        if (port == null) continue;
+                        string label = StripPortSuffix(caption, port);
+                        string current;
+                        if (label.Length > 0 && (!result.TryGetValue(port, out current) || current.Length < label.Length))
+                        {
+                            result[port] = label;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // WMI sorgulanamıyorsa liste çıplak COM adlarıyla devam eder.
+            }
+            return result;
+        }
+
+        private static string Text(object value)
+        {
+            return value == null ? "" : Convert.ToString(value).Trim();
+        }
+
+        /// <summary>"USB Serial Port (COM14)" metninden "COM14" çıkarır; yoksa null.</summary>
+        public static string PortNameOf(string caption)
+        {
+            if (caption == null) return null;
+            int open = caption.IndexOf("(COM", StringComparison.OrdinalIgnoreCase);
+            if (open < 0) return null;
+            int end = open + 4;
+            while (end < caption.Length && caption[end] >= '0' && caption[end] <= '9') end++;
+            if (end == open + 4 || end >= caption.Length || caption[end] != ')') return null;
+            return caption.Substring(open + 1, end - open - 1).ToUpperInvariant();
+        }
+
+        /// <summary>Açıklamadaki "(COM14)" parçasını silip kalanı döner; port zaten listede görünüyor.</summary>
+        public static string StripPortSuffix(string caption, string portName)
+        {
+            if (caption == null) return "";
+            int open = caption.IndexOf("(COM", StringComparison.OrdinalIgnoreCase);
+            if (open < 0) return caption.Trim();
+            int end = open + 4;
+            while (end < caption.Length && caption[end] >= '0' && caption[end] <= '9') end++;
+            if (end == open + 4 || end >= caption.Length || caption[end] != ')') return caption.Trim();
+            string head = caption.Substring(0, open).Trim();
+            string tail = caption.Substring(end + 1).Trim();
+            if (head.Length == 0) return tail;
+            if (tail.Length == 0) return head;
+            return head + " " + tail;
+        }
+    }
     /// <summary>
     /// Modbus RTU (seri / RS485) istemcisi. Çerçeve birim id + PDU + CRC16 (düşük bayt önce)
     /// biçimindedir; MBAP başlığı ve transaction takibi yoktur, yanıt uzunluğu fonksiyon
