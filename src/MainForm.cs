@@ -57,14 +57,19 @@ namespace ModbusScan
         {
             Text = "Modbus Test v" + typeof(Program).Assembly.GetName().Version.ToString(3);
             ClientSize = new Size(500, 600);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
+            // Varsayılan 500x600 ama kullanıcı kenardan tutup büyütebilsin; öğeler anchor ile dağılıyor.
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            // MinimumSize çerçeve payını da içerir; pay düşülmezse küçültme sınırı yüzünden
+            // istenen 500 px'lik içerik genisligine inilemiyor (ClientSize 502'de takılıyor).
+            MinimumSize = new Size(ClientSize.Width + (Size.Width - ClientSize.Width), 430);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Segoe UI", 8.25f);
 
             gbConnection = new GroupBox();
             gbConnection.Text = "Bağlantı";
             gbConnection.SetBounds(8, 4, 484, 74);
+            gbConnection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
             // Başlık satırındaki seçim kutusu grubun içeriğini TCP / RS485 arasında değiştirir.
             cmbMode = new ComboBox();
@@ -132,18 +137,21 @@ namespace ModbusScan
             btnConnect = new Button();
             btnConnect.Text = "Bağlan";
             btnConnect.SetBounds(314, 23, 74, 25);
+            btnConnect.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnConnect.Click += OnConnect;
             gbConnection.Controls.Add(btnConnect);
 
             btnDisconnect = new Button();
             btnDisconnect.Text = "Kes";
             btnDisconnect.SetBounds(392, 23, 80, 25);
+            btnDisconnect.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnDisconnect.Click += OnDisconnect;
             btnDisconnect.Enabled = false;
             gbConnection.Controls.Add(btnDisconnect);
 
             lblStatus = new Label();
             lblStatus.SetBounds(10, 50, 462, 16);
+            lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             lblStatus.Text = "Durum: bağlı değil";
             lblStatus.ForeColor = Color.Gray;
             gbConnection.Controls.Add(lblStatus);
@@ -151,6 +159,7 @@ namespace ModbusScan
             gbRead = new GroupBox();
             gbRead.Text = "Okuma";
             gbRead.SetBounds(8, 82, 484, 112);
+            gbRead.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
             cmbFunction = new ComboBox();
             cmbFunction.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -208,7 +217,8 @@ namespace ModbusScan
             cmbDecode.SelectedIndexChanged += OnRedisplay;
             gbRead.Controls.Add(cmbDecode);
 
-            gbRead.Controls.Add(MakeLabel("Kelime", 352, 52));
+            Label lblWords = MakeLabel("Kelime", 352, 52);
+            gbRead.Controls.Add(lblWords);
             cmbWordOrder = new ComboBox();
             cmbWordOrder.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbWordOrder.SetBounds(396, 49, 76, 22);
@@ -224,31 +234,42 @@ namespace ModbusScan
             lblSummary.ForeColor = Color.DimGray;
             gbRead.Controls.Add(lblSummary);
 
+            // Buyume davranisi: sagdaki buton/secim sag kenara, soldaki alanlar sol kenara yapik kalir.
+            btnRead.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnClear.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblSummary.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblWords.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            cmbWordOrder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
             lblUpdate = new Label();
             lblUpdate.SetBounds(8, 201, 296, 16);
+            lblUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             lblUpdate.Text = "Güncelleme: henüz denetlenmedi";
             lblUpdate.ForeColor = Color.Gray;
 
             btnCheckUpdate = new Button();
             btnCheckUpdate.Text = "Denetle";
             btnCheckUpdate.SetBounds(310, 196, 82, 25);
+            btnCheckUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnCheckUpdate.Click += OnCheckUpdate;
 
             btnUpdate = new Button();
             btnUpdate.Text = "Güncelle";
             btnUpdate.SetBounds(396, 196, 96, 25);
+            btnUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnUpdate.Enabled = false;
             btnUpdate.Click += OnInstallUpdate;
 
             grid = new DefinitionGrid();
             grid.SetBounds(8, 226, 484, 246);
+            grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
             grid.RowHeadersVisible = false;
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
-            grid.AllowUserToResizeColumns = false;
+            grid.AllowUserToResizeColumns = true;
             grid.ScrollBars = ScrollBars.Vertical;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.Fixed3D;
@@ -268,6 +289,7 @@ namespace ModbusScan
 
             txtLog = new TextBox();
             txtLog.SetBounds(8, 478, 484, 114);
+            txtLog.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             txtLog.Multiline = true;
             txtLog.ReadOnly = true;
             txtLog.ScrollBars = ScrollBars.Vertical;
@@ -301,6 +323,18 @@ namespace ModbusScan
             tb.Text = text;
             tb.SetBounds(x, y, width, 21);
             return tb;
+        }
+
+        private static void AnchorRight(params Control[] controls)
+        {
+            for (int i = 0; i < controls.Length; i++)
+                controls[i].Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        }
+
+        private static void AnchorLeft(params Control[] controls)
+        {
+            for (int i = 0; i < controls.Length; i++)
+                controls[i].Anchor = AnchorStyles.Top | AnchorStyles.Left;
         }
 
         private static DataGridViewTextBoxColumn NewColumn(string name, string header, int width,
@@ -380,6 +414,8 @@ namespace ModbusScan
                 txtTimeout.SetBounds(408, 25, 40, 21);
                 btnConnect.SetBounds(314, 1, 74, 21);
                 btnDisconnect.SetBounds(392, 1, 78, 21);
+                // ID/ms satırın sağında; pencere büyüdüğünde sağ kenarla birlikte kayar.
+                AnchorRight(lblUnit, txtUnit, lblMs, txtTimeout);
                 RefreshPorts();
             }
             else
@@ -390,6 +426,7 @@ namespace ModbusScan
                 txtTimeout.SetBounds(268, 25, 40, 21);
                 btnConnect.SetBounds(314, 23, 74, 25);
                 btnDisconnect.SetBounds(392, 23, 80, 25);
+                AnchorLeft(lblUnit, txtUnit, lblMs, txtTimeout);
             }
         }
 
@@ -619,9 +656,14 @@ namespace ModbusScan
                 lblSummary.Text = "Geçersiz adres.";
                 return;
             }
-            if (!int.TryParse(txtQuantity.Text.Trim(), out quantity) || quantity < 1 || quantity > 125)
+            if (!int.TryParse(txtQuantity.Text.Trim(), out quantity) || quantity < 1)
             {
-                lblSummary.Text = "Adet 1..125 olmalı.";
+                lblSummary.Text = "Adet en az 1 olmalı.";
+                return;
+            }
+            if (address + quantity > 65536)
+            {
+                lblSummary.Text = "Adres alanı 0..65535: @" + address + " için en fazla " + (65536 - address) + " kayıt.";
                 return;
             }
             if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs)) timeoutMs = 2000;
@@ -629,12 +671,14 @@ namespace ModbusScan
             byte fc = SelectedFunction();
             DateTime start = DateTime.Now;
             RegisterRead read;
+            Client.Progress = ReportReadProgress;
             try
             {
                 read = Client.Read(fc, address, quantity, timeoutMs);
             }
             catch (Exception ex)
             {
+                Client.Progress = null;
                 read = null;
                 lblSummary.Text = "Hata: " + ShortMessage(ex);
                 lblSummary.ForeColor = Color.Firebrick;
@@ -646,12 +690,21 @@ namespace ModbusScan
                 return;
             }
 
+            Client.Progress = null;
             read.ElapsedMilliseconds = (int)(DateTime.Now - start).TotalMilliseconds;
             _lastRead = read;
             lblSummary.ForeColor = Color.DimGray;
             ShowRead(read);
             Log("OKUMA FC" + fc.ToString("D2") + " @" + address + " x" + quantity +
-                " → " + read.Data.Length + " bayt, " + read.ElapsedMilliseconds + " ms");
+                " → " + read.Data.Length + " bayt, " + read.Requests + " istek, " + read.ElapsedMilliseconds + " ms");
+        }
+
+        /// <summary>Parçalı okuma ilerlemesini durum satırında gösterir; büyük okumalarda pencere donmuş görünmesin.</summary>
+        private void ReportReadProgress(int done, int total)
+        {
+            lblSummary.ForeColor = Color.DimGray;
+            lblSummary.Text = "Okunuyor: " + done + " / " + total + " kayıt";
+            lblSummary.Refresh();
         }
 
         /// <summary>Değer sütununa çift tık: yazma penceresi. Tanım sütununa çift tık: hücreyi düzenle.</summary>
@@ -740,7 +793,8 @@ namespace ModbusScan
 
             grid.ResumeLayout();
             lblSummary.Text = read.Quantity + " kayıt, " + read.Data.Length + " bayt, " +
-                              read.ElapsedMilliseconds + " ms · çift tık: yaz · Tanım'a Ctrl+V";
+                              read.Requests + " istek, " + read.ElapsedMilliseconds +
+                              " ms · çift tık: yaz · Tanım'a Ctrl+V";
         }
 
         /// <summary>Satırın Değer sütununda görünecek metni, seçili çözümlemeye göre üretir.</summary>

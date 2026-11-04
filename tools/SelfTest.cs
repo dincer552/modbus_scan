@@ -298,9 +298,80 @@ internal static class SelfTest
             RegisterRead afterTimeout = client.Read(3, 100, 5, 3000);
             Check("Zaman asimindan sonra okuma suruyor", afterTimeout.Data.Length == 10, "len=" + afterTimeout.Data.Length);
 
+            // Adet siniri kaldirildi: tek istege sigmayan aralik parcalara bolunur.
+            io.RequestCount = 0;
+            RegisterRead exact = client.Read(3, 5000, ModbusClient.MaxRegistersPerRequest, 3000);
+            Check("125 register tek istekte", io.RequestCount == 1 && exact.Requests == 1, "istek=" + io.RequestCount);
+
+            io.RequestCount = 0;
+            int progressCalls = 0;
+            int lastDone = -1;
+            client.Progress = delegate(int done, int total)
+            {
+                progressCalls++;
+                if (total != 300 || done <= lastDone) throw new InvalidOperationException("akis bozuk: " + done + "/" + total);
+                lastDone = done;
+            };
+            RegisterRead chunked = client.Read(3, 5000, 300, 3000);
+            client.Progress = null;
+            Check("300 register 3 istekte", io.RequestCount == 3 && chunked.Requests == 3, "istek=" + io.RequestCount);
+            Check("Ilerleme her parcada bildirildi", progressCalls == 3 && lastDone == 300,
+                  "bildirim=" + progressCalls + " son=" + lastDone);
+            Check("Parcali okuma 600 bayt", chunked.Data.Length == 600, "len=" + chunked.Data.Length);
+            Check("Parcali okuma Quantity alani", chunked.Quantity == 300, "q=" + chunked.Quantity);
+            Check("Parcalar adres desende surekli", MatchesPattern(chunked.Data, 5000, false), FirstPatternDiff(chunked.Data, 5000, false));
+
+            io.RequestCount = 0;
+            RegisterRead manyBits = client.Read(1, 5000, 2100, 3000);
+            Check("2100 bit 2 istekte", io.RequestCount == 2 && manyBits.Requests == 2, "istek=" + io.RequestCount);
+            Check("2100 bit 263 bayt", manyBits.Data.Length == 263, "len=" + manyBits.Data.Length);
+            Check("Bit parcalari bayt hizali surekli", MatchesPattern(manyBits.Data, 5000, true), FirstPatternDiff(manyBits.Data, 5000, true));
+
+            bool rejectedZero = false;
+            try { client.Read(3, 0, 0, 1000); }
+            catch (ArgumentException ex) { rejectedZero = ex.Message.Contains("Adet"); }
+            Check("Adet sifir reddediliyor", rejectedZero, "istisna yok");
+
+            bool rejectedOverflow = false;
+            try { client.Read(3, 65500, 100, 1000); }
+            catch (ArgumentException ex) { rejectedOverflow = ex.Message.Contains("65535"); }
+            Check("Adres alani tasma siniri", rejectedOverflow, "istisna yok");
+
             client.Close();
             Check("RTU kapatma sonrasi IsConnected false", !client.IsConnected, "IsConnected hala true");
         }
+    }
+
+    /// <summary>
+    /// Sahte cihaz deseninin tek kaynagi: bayt indeksini mutlak adrese baglar. Parca sinirlarinda
+    /// istemci adet (kayit/bit) bazinda ilerledigi icin desen burada adres cinsinden tanimli olmali.
+    /// </summary>
+    private static byte ExpectedPatternByte(int address, int i, bool bits)
+    {
+        if (bits) return (byte)(((address >> 3) + i) & 0xFF);
+        int register = address + (i >> 1);
+        return (byte)((i & 1) == 0 ? ((register >> 8) & 0xFF) : (register & 0xFF));
+    }
+
+    /// <summary>Parcalanmis okumada verinin adres deseni boyunca kesintisiz aktigini dogrular.</summary>
+    private static bool MatchesPattern(byte[] data, int startAddress, bool bits)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != ExpectedPatternByte(startAddress, i, bits)) return false;
+        }
+        return true;
+    }
+
+    private static string FirstPatternDiff(byte[] data, int startAddress, bool bits)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != ExpectedPatternByte(startAddress, i, bits))
+                return i + ": beklenen 0x" + ExpectedPatternByte(startAddress, i, bits).ToString("X2") +
+                       ", gelen 0x" + data[i].ToString("X2");
+        }
+        return "fark yok";
     }
 
     /// <summary>Sahte RTU cihazinin PDU uretici: cerceve CRC'sini dogrular, istege yanit PDU'su dondurur.</summary>
@@ -313,6 +384,18 @@ internal static class SelfTest
         int address = (frame[2] << 8) | frame[3];
 
         if (fc == 3 && address == 9000) return ModbusRtuClient.BuildFrame(unit, new byte[] { 0x83, 0x02 });
+        if (address >= 5000 && (fc == 1 || fc == 2 || fc == 3 || fc == 4))
+        {
+            // Cok istekli okuma senaryosu: istenen adet kadar cevap, desen mutlak adresten.
+            int qty = (frame[4] << 8) | frame[5];
+            bool bitFc = fc == 1 || fc == 2;
+            int bytes = bitFc ? (qty + 7) / 8 : qty * 2;
+            byte[] pdu = new byte[bytes + 2];
+            pdu[0] = fc;
+            pdu[1] = (byte)bytes;
+            for (int i = 0; i < bytes; i++) pdu[i + 2] = ExpectedPatternByte(address, i, bitFc);
+            return ModbusRtuClient.BuildFrame(unit, pdu);
+        }
         if (fc == 3) return ModbusRtuClient.BuildFrame(unit, new byte[] { 3, 10, 0x12, 0x34, 0xFF, 0xFE, 0x40, 0x20, 0x00, 0x00, 0x00, 0x64 });
         if (fc == 1) return ModbusRtuClient.BuildFrame(unit, new byte[] { 1, 2, 0x09, 0x02 });
         if (fc == 2) return ModbusRtuClient.BuildFrame(unit, new byte[] { 2, 1, 0x05 });
@@ -332,6 +415,7 @@ internal static class SelfTest
         private readonly Func<byte[], byte[]> _device;
 
         public string LastRequest = "";
+        public int RequestCount;    // kac istek cercevesi gitti (okuma parcalama testi icin)
         public int CorruptNext;     // 1 = CRC baytini boz, 2 = birim id'yi boz
         public bool SilentNext;     // true = cihaz hiç cevap vermesin
 
@@ -350,6 +434,7 @@ internal static class SelfTest
             byte[] request = _tx.ToArray();
             _tx.Clear();
             LastRequest = ModbusRtuClient.ToHex(request);
+            RequestCount++;
 
             byte[] reply = _device(request);
             if (reply == null || SilentNext) { SilentNext = false; return; }

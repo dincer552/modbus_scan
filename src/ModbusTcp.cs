@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
@@ -46,6 +47,7 @@ namespace ModbusScan
         public byte[] Data;
         public int ElapsedMilliseconds;
         public int BytesPerItem;
+        public int Requests;
     }
 
     /// <summary>
@@ -65,39 +67,65 @@ namespace ModbusScan
 
         public void Dispose() { Close(); }
 
+        /// <summary>Tek Modbus isteğinin sığdırabildiği en büyük miktarlar; üstü parçalara bölünür.</summary>
+        public const int MaxRegistersPerRequest = 125;
+        public const int MaxBitsPerRequest = 2000;
+
+        /// <summary>Parçalı okumada her parçadan sonra (okunan, istenen) bildirir; uzun okumada arayüz donmuş görünmesin.</summary>
+        public Action<int, int> Progress;
+
+        /// <summary>İstenen aralığı taşımanın tek istekte kaldıramayacağı parçalara bölerek okur.</summary>
         public RegisterRead Read(byte functionCode, int startAddress, int quantity, int timeoutMs)
         {
             if (!IsConnected) throw new InvalidOperationException("Baglanti yok.");
-            if (quantity < 1 || quantity > 125) throw new ArgumentException("Adet 1..125 olmali.");
+            if (quantity < 1) throw new ArgumentException("Adet 1 veya daha büyük olmalı.");
+            if (startAddress < 0 || startAddress + quantity > 65536)
+                throw new ArgumentException("Adres alanı 0..65535: @" + startAddress + " ile en fazla " +
+                                           (65536 - startAddress) + " kayıt okunabilir.");
 
-            byte[] request = new byte[5];
-            request[0] = functionCode;
-            request[1] = (byte)((startAddress >> 8) & 0xFF);
-            request[2] = (byte)(startAddress & 0xFF);
-            request[3] = (byte)((quantity >> 8) & 0xFF);
-            request[4] = (byte)(quantity & 0xFF);
+            bool bits = functionCode == 1 || functionCode == 2;
+            int bytesPerItem = bits ? 1 : 2;
+            int chunkLimit = bits ? MaxBitsPerRequest : MaxRegistersPerRequest;
 
-            int bytesPerItem = (functionCode == 1 || functionCode == 2) ? 1 : 2;
-            byte[] response = Transact(request, timeoutMs);
-            if (response.Length == 0)
-                throw new IOException("Sunucu boş yanıt verdi (byte count alanı yok).");
+            List<byte> data = new List<byte>();
+            int done = 0, requests = 0;
+            while (done < quantity)
+            {
+                int take = quantity - done;
+                if (take > chunkLimit) take = chunkLimit;
 
-            int byteCount = response[0];
-            int expected = bytesPerItem == 1 ? (quantity + 7) / 8 : quantity * 2;
-            if (byteCount != response.Length - 1)
-                throw new IOException("Byte count tutarsız: bildirilen " + byteCount + ", gelen " + (response.Length - 1) + ".");
-            if (byteCount != expected)
-                throw new IOException("Beklenen " + expected + " bayt yerine " + byteCount + " bayt geldi.");
+                int address = startAddress + done;
+                byte[] request = new byte[5];
+                request[0] = functionCode;
+                request[1] = (byte)((address >> 8) & 0xFF);
+                request[2] = (byte)(address & 0xFF);
+                request[3] = (byte)((take >> 8) & 0xFF);
+                request[4] = (byte)(take & 0xFF);
 
-            byte[] data = new byte[byteCount];
-            Array.Copy(response, 1, data, 0, byteCount);
+                byte[] response = Transact(request, timeoutMs);
+                requests++;
+                if (response.Length == 0)
+                    throw new IOException("Sunucu boş yanıt verdi (byte count alanı yok).");
+
+                int byteCount = response[0];
+                int expected = bits ? (take + 7) / 8 : take * 2;
+                if (byteCount != response.Length - 1)
+                    throw new IOException("Byte count tutarsız: bildirilen " + byteCount + ", gelen " + (response.Length - 1) + ".");
+                if (byteCount != expected)
+                    throw new IOException("Beklenen " + expected + " bayt yerine " + byteCount + " bayt geldi.");
+
+                for (int i = 1; i <= byteCount; i++) data.Add(response[i]);
+                done += take;
+                if (Progress != null) Progress(done, quantity);
+            }
 
             RegisterRead result = new RegisterRead();
             result.FunctionCode = functionCode;
             result.StartAddress = startAddress;
             result.Quantity = quantity;
-            result.Data = data;
+            result.Data = data.ToArray();
             result.BytesPerItem = bytesPerItem;
+            result.Requests = requests;
             return result;
         }
 

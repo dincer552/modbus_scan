@@ -154,7 +154,10 @@ $cases += [pscustomobject]@{ Name = 'FC04 input 3xxxx'; Function = 1; Decode = 0
 $cases += [pscustomobject]@{ Name = 'FC01 coil bit deseni'; Function = 2; Decode = 0; Word = 0; Addr = '0'; Qty = '12'; Rows = 12; Cell = '3 | 4 |' }
 $cases += [pscustomobject]@{ Name = 'FC02 discrete 1xxxx'; Function = 3; Decode = 0; Word = 0; Addr = '2'; Qty = '6'; Rows = 6; Cell = '1 | 10004 |' }
 $cases += [pscustomobject]@{ Name = 'PDU adres modu'; Function = 0; Decode = 0; Word = 0; Addr = '3'; Qty = '1'; Rows = 1; Cell = '0 | 3 |'; Convention = $false }
-$cases += [pscustomobject]@{ Name = 'Adet siniri 126'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '126'; Rows = 0; Cell = 'Adet 1..125' }
+$cases += [pscustomobject]@{ Name = 'Adet limiti yok: 300 register 3 istek'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '300'; Rows = 300; Cell = '3 istek' }
+$cases += [pscustomobject]@{ Name = '125 register tek istek kalicyor'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '125'; Rows = 125; Cell = '1 istek' }
+$cases += [pscustomobject]@{ Name = 'Adet 0 reddediliyor'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '0'; Rows = 0; Cell = 'Adet en az 1' }
+$cases += [pscustomobject]@{ Name = 'Adres alani tasma uyarisi'; Function = 0; Decode = 0; Word = 0; Addr = '65500'; Qty = '100'; Rows = 0; Cell = '65535' }
 $cases += [pscustomobject]@{ Name = 'Exception FC03/02'; Function = 0; Decode = 0; Word = 0; Addr = '9000'; Qty = '1'; Rows = 0; Cell = 'hata kodu 02' }
 
 foreach ($case in $cases) {
@@ -288,6 +291,68 @@ $grid.CurrentCell = $grid.Rows[$grid.Rows.Count - 1].Cells['colDef']
 $thrown = $false
 try { Invoke-Method $form 'PasteDefinitions' @() } catch { $thrown = $true }
 Assert (-not $thrown) 'ctrl+v pano yolu hatada cokmuyor' 'exception'
+
+# --- Yeniden boyutlandirilabilir pencere ve sutunlar (ayni canli baglanti uzerinde) ---
+Assert ($form.FormBorderStyle -eq 'Sizable') 'pencere kenardan suruklenerek boyutlandirilir' ([string]$form.FormBorderStyle)
+Assert ($form.MaximizeBox) 'buyutme butonu acik' 'MaximizeBox=false'
+Assert ($form.ClientSize.Width -eq 500 -and $form.ClientSize.Height -eq 600) `
+    'varsayilan ic boyut 500x600 korunuyor' ("{0}x{1}" -f $form.ClientSize.Width, $form.ClientSize.Height)
+Assert (($form.MinimumSize.Width - ($form.Size.Width - $form.ClientSize.Width)) -eq 500) `
+    'kucultme siniri 500 px icerige kadar iniyor' ("min={0} pencere={1}" -f $form.MinimumSize.Width, $form.Size.Width)
+
+$szGrid = Get-Field $form 'grid'
+Assert ($szGrid.AllowUserToResizeColumns) 'sutunlar baslik kenarindan suruklenir' 'AllowUserToResizeColumns=false'
+$locked = @($szGrid.Columns | Where-Object { $_.Resizable -ne 'True' } | ForEach-Object { $_.Name })
+Assert ($locked.Count -eq 0) 'tum sutunlar yeniden boyutlanabilir' ($locked -join ',')
+Assert ($szGrid.Columns['colDef'].AutoSizeMode -eq 'Fill') 'Tanim sutunu bosluklari dolduruyor (buyuyunce tablo bos kalmiyor)' `
+    ([string]$szGrid.Columns['colDef'].AutoSizeMode)
+
+$form.Show()
+[System.Windows.Forms.Application]::DoEvents()
+$base = @{ W = $szGrid.Width; H = $szGrid.Height; LogTop = (Get-Field $form 'txtLog').Top; LogH = (Get-Field $form 'txtLog').Height }
+$form.ClientSize = New-Object System.Drawing.Size 760, 760
+[System.Windows.Forms.Application]::DoEvents()
+Assert (($szGrid.Width - $base.W) -ge 250 -and ($szGrid.Height - $base.H) -ge 150) `
+    'buyutunce tablo hem genisler hem uzar' ("dw={0} dh={1}" -f ($szGrid.Width - $base.W), ($szGrid.Height - $base.H))
+Assert ((Get-Field $form 'txtLog').Height -eq $base.LogH -and (Get-Field $form 'txtLog').Top -ge $base.LogTop + 150) `
+    'log alta yapisaliyor, bos alanı tablo aliyor' ("logYukseklik={0} logUst={1}" -f (Get-Field $form 'txtLog').Height, (Get-Field $form 'txtLog').Top)
+Assert ($szGrid.Bottom -le (Get-Field $form 'txtLog').Top -and (Get-Field $form 'txtLog').Bottom -le $form.ClientSize.Height - 2) `
+    'buyuyen pencerede kontroller ust uste binmiyor/tasmiyor' `
+    ("tabloAlt={0} logUst={1} logAlt={2} icerik={3}" -f $szGrid.Bottom, (Get-Field $form 'txtLog').Top, (Get-Field $form 'txtLog').Bottom, $form.ClientSize.Height)
+
+$stripBad = @()
+$lu = Get-Field $form 'lblUpdate'; $dc = Get-Field $form 'btnCheckUpdate'; $du = Get-Field $form 'btnUpdate'
+if ($lu.Right -gt $dc.Left -or $dc.Right -gt $du.Left -or $du.Right -gt $form.ClientSize.Width - 4) {
+    $stripBad += ('serit: etiketSag={0} denetleSag={1} guncelleSag={2}' -f $lu.Right, $dc.Right, $du.Right)
+}
+foreach ($pair in @(@('btnRead', 'gbRead'), @('btnClear', 'gbRead'), @('cmbWordOrder', 'gbRead'),
+                    @('btnConnect', 'gbConnection'), @('btnDisconnect', 'gbConnection'))) {
+    $c = Get-Field $form $pair[0]
+    $box = Get-Field $form $pair[1]
+    if ($c.Right -gt $box.Width - 2) { $stripBad += ('{0} sag={1} kutu={2}' -f $pair[0], $c.Right, $box.Width) }
+}
+Assert ($stripBad.Count -eq 0) 'buyuk pencerede sag butonlar etikete/kenara tasmiyor' ($stripBad -join ' | ')
+
+# Buyutulmus pencerede parcali okuma: 200 kayit, 2 istek
+(Get-Field $form 'txtAddress').Text = '0'
+(Get-Field $form 'txtQuantity').Text = '200'
+Invoke-Handler $form 'OnRead'
+Assert (@(Get-GridRows $form).Count -eq 200) 'buyutulmus pencerede 200 kayitlik parcali okuma' `
+    ([string](Get-Field $form 'lblSummary').Text)
+Assert ($null -eq (Get-Field $form '_tcp').Progress) 'okuma bitince ilerleme geri cagrisi temizleniyor' `
+    'Progress atanmis kaldi'
+
+$form.ClientSize = New-Object System.Drawing.Size $form.MinimumSize.Width, $form.MinimumSize.Height
+[System.Windows.Forms.Application]::DoEvents()
+$displaced = @()
+foreach ($name in @('gbConnection', 'gbRead', 'lblSummary', 'lblUpdate', 'grid', 'txtLog')) {
+    $c = Get-Field $form $name
+    if ($c.Top -lt 0 -or $c.Left -lt 0 -or $c.Height -le 0) { $displaced += ('{0}={1},{2}x{3}' -f $name, $c.Left, $c.Top, $c.Height) }
+}
+Assert ($displaced.Count -eq 0) 'en kucuk boyutta kontroller kaybolmuyor' ($displaced -join ',')
+Assert ($szGrid.Columns['colDef'].Width -ge 10) 'Tanim sutunu cok daraltildiginda yok olmuyor' `
+    ([string]$szGrid.Columns['colDef'].Width)
+$form.Hide()
 
 $form.Close()
 

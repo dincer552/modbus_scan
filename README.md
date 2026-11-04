@@ -1,6 +1,6 @@
 # ModbusScan
 
-Kompakt (500 × 600 px) bir **Modbus test aracı**. `mbpoll`ün okuma tarafını, tek bir `.exe` ve kurulum derdi olmadan sunar; **Modbus TCP** ve **Modbus RTU (RS485/seri)** olmak üzere iki bağlantı modu vardır.
+Kompakt (varsayılan **500 × 600 px**, istediğin boyuta getirilebilen) bir **Modbus test aracı**. `mbpoll`ün okuma tarafını, tek bir `.exe` ve kurulum derdi olmadan sunar; **Modbus TCP** ve **Modbus RTU (RS485/seri)** olmak üzere iki bağlantı modu vardır.
 
 Okuma: FC01 (coil), FC02 (discrete input), FC03 (holding register), FC04 (input register).
 Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda bir hücreye çift tıklayarak.
@@ -18,11 +18,20 @@ Ek bir şey kurmana gerek yok — Windows 10/11'de gelen .NET Framework 4.8 ile 
 
 1. **Bağlantı kutusunun başlığındaki seçim**: `TCP` → IP/Port/ID/ms, `RS485` → COM/hız/parite/durdurma/ID/ms. Bağlantı kurulduktan sonra seçim kilitlenir; değiştirmek için önce **Kes**.
 2. **Bağlan** → durum satırı yeşile döner (`Durum: bağlı → 10.90.38.24:502` veya `Durum: bağlı → COM3 9600 8N1`).
-3. **Fonksiyon** seç, **Adres** (PDU, 0 tabanlı) ve **Adet** (1–125) gir, **OKU**.
+3. **Fonksiyon** seç, **Adres** (PDU, 0 tabanlı) ve **Adet** gir, **OKU**. Adette sınır yok: tek istekte taşınabilecek en büyük parça (125 register / 2000 bit) kadarlık dilimlere bölünüp ardışık isteklerle okunur.
 4. Tablo dört sütun gösterir: **#** (satıra yazdığın tanım), **Adres**, **Değer** (seçtiğin çözümleme) ve **Tanım** (senin notun).
    - **Değer** sütunu, yukarıdaki **Değer** kutusundaki çözümlemeyi kullanır: `Ondalık (uint16)`, `İşaretli (int16)`, `Hex`, `Float32`, `Uint32`, `Int32`. Ham hex görmek istersen çözümlemeyi `Hex` seç.
    - **4xxxx göster** işaretliyken adresler mbpoll alışkanlığıyla `40001 / 30001 / 10001 / 00001` biçiminde yazılır; kaldırırsan düz PDU adresi görürsün.
    - **Değer** kutusundan `Float32 / Uint32 / Int32` seçince **Kelime** kutusu açılır: `ABCD` (big-endian), `CDAB` (word swap), `BADC` (byte swap), `DCBA` (little-endian).
+
+## Pencere ve sütun boyutları
+
+![Solda varsayılan 500×600, ortada büyütülmüş ve Değer/Adres sütunları sürüklenmiş, sağda en küçük boyut](docs/pencere-boyutlandirma.png)
+
+- Program 500 × 600 px açılır, ama pencere artık **kenarından tutulup büyütülebilir/küçültülebilir**; sağ üstte **Buyut** kutusu da çalışır. Küçültme sınırı tasarım boyutudur (500 px içerik), daha altına inmez.
+- Büyütünce **tablo** hem genişler hem uzar; **log** alta yapışık kalır, sağdaki butonlar (`OKU`, `Temizle`, `Denetle`, `Güncelle`, `Bağlan`, `Kes`) sağ kenarı takip eder.
+- **Sütun genişlikleri**: tablo başlığındaki sütun sınırını sürükleyerek değiştir. **Tanım** sütunu `Fill` modundadır, yani kalan boşluğu doldurur — pencereyi ne kadar büyütürsen büyüt, tabloda sağda boş şerit kalmaz.
+- Ayarlar kalıcı değil; program yeniden 500 × 600 açılır.
 
 ## RS485 (Modbus RTU) bağlantısı
 
@@ -74,8 +83,8 @@ Pencerede gönderilecek baytlar **önizleme** satırında görünür — örn. `
 Pencerenin altındaki şerit programın kendi güncelliğini takip eder:
 
 - Program açıldıktan ~1 saniye sonra bir kez, sonra **her 60 saniyede** GitHub'daki en yeni release etiketi sorgulanır.
-- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.6.0 (54.0 KB)`) ve **Güncelle** butonu aktif olur.
-- Sürüm sende ise gri `Güncel: v0.6.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
+- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.7.0 (59.0 KB)`) ve **Güncelle** butonu aktif olur.
+- Sürüm sende ise gri `Güncel: v0.7.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
 - **Denetle** butonu aynı sorguyu elle, hemen yaptırır (log satırında sonucu görünür).
 - **Güncelle** exe'yi geçici klasöre indirir, boyutunu ve `MZ` başlığını doğrular, sonra kendini değiştiren kısa bir betik başlatır: program kapanır, betik dosya kilidi çözülünce yenisiyle değiştirip uygulamayı yeniden açar. Değişim olmazsa eski exe açılır ve sürüm sayfası tarayıcıda açılır.
 - İndirme sırasında sağ tıklamaya gerek yok; buton **Sayfayı aç** olur ve sürüm sayfasına gider (asset henüz hazır değilse).
@@ -104,7 +113,7 @@ Soket seviyesindeki testler harici sunucu gerektirmez — kendi process'i içind
 dist\SelfTest.exe
 ```
 
-Bu araç MBAP çerçevelemesini (transaction/unit id, big-endian adres/adet), dört fonksiyon kodunun yanıtını, `uint16/int16/float32/uint32` çözümlerini, kelime sırasını, Modbus exception'ını ve byte count tutarsızlığını doğrular. Yazma tarafında FC05/FC06/FC16 çerçevelerinin doğru baytları taşıdığını, yankı uyuşmazlığını ve her kelime sırası için kodlama ↔ çözme gidiş-dönüşünü kontrol eder. RTU tarafı iki parçaya ayrılır: çerçeveleme testleri CRC16'nın bilinen vektörlerle (`01 03 00 00 00 0A → C5 CD`) aynı baytları ürettiğini, `HasValidCrc`'nin bozuk çerçeveyi yakaladığını ve `8N1 / 8E2` özetini denetler; tam yığın testi ise COM port açmadan, sahte bir çift yönlü akış üzerinden RTU cihazını taklit eder — okuma/yazma gidiş-dönüşü, exception, CRC hatası, yanlış birim id, yanıtsızlıktan doğan zaman aşımı ve zaman aşımından sonra tamponun temiz kalıp bir sonraki okumanın çalıştığı burada doğrulanır. Ayrıca güncelleyicinin saf fonksiyonlarını (etiket çözümleme, 302 hedefinden etiket çıkarma, asset URL'i, sürüm karşılaştırması, boyut biçimleme) ağa çıkmadan test eder. COM listesi açıklamalarında ise `Win32_PnPEntity` başlıklarının ayrıştırılması (`USB Serial Port (COM14)` → port `COM14`, açıklama `USB Serial Port`) ve WMI sorgusunun hata vermeden boş dönebilmesi doğrulanır.
+Bu araç MBAP çerçevelemesini (transaction/unit id, big-endian adres/adet), dört fonksiyon kodunun yanıtını, `uint16/int16/float32/uint32` çözümlerini, kelime sırasını, Modbus exception'ını ve byte count tutarsızlığını doğrular. Yazma tarafında FC05/FC06/FC16 çerçevelerinin doğru baytları taşıdığını, yankı uyuşmazlığını ve her kelime sırası için kodlama ↔ çözme gidiş-dönüşünü kontrol eder. Parçalı okuma tarafında 125 register'ın tek istekte kaldığını, 300 register'in 3 isteğe bölündüğünü, 2100 bit'in 2 istek ve 263 bayt olduğunu, dilimlerin birleşince kesintisiz tek desen oluşturduğunu, ilerleme geri çağrısının her dilimde artarak çağrıldığını ve `0` adet ile `Adres + Adet > 65536` taşmasının istisnayla reddedildiğini denetler. RTU tarafı iki parçaya ayrılır: çerçeveleme testleri CRC16'nın bilinen vektörlerle (`01 03 00 00 00 0A → C5 CD`) aynı baytları ürettiğini, `HasValidCrc`'nin bozuk çerçeveyi yakaladığını ve `8N1 / 8E2` özetini denetler; tam yığın testi ise COM port açmadan, sahte bir çift yönlü akış üzerinden RTU cihazını taklit eder — okuma/yazma gidiş-dönüşü, exception, CRC hatası, yanlış birim id, yanıtsızlıktan doğan zaman aşımı ve zaman aşımından sonra tamponun temiz kalıp bir sonraki okumanın çalıştığı burada doğrulanır. Ayrıca güncelleyicinin saf fonksiyonlarını (etiket çözümleme, 302 hedefinden etiket çıkarma, asset URL'i, sürüm karşılaştırması, boyut biçimleme) ağa çıkmadan test eder. COM listesi açıklamalarında ise `Win32_PnPEntity` başlıklarının ayrıştırılması (`USB Serial Port (COM14)` → port `COM14`, açıklama `USB Serial Port`) ve WMI sorgusunun hata vermeden boş dönebilmesi doğrulanır.
 
 Gerçek cihaz yokken arayüzü ve tam yığınını denemek için sahte Modbus TCP sunucusu:
 
@@ -123,18 +132,18 @@ dist\Probe.exe --com COM3 --baud 9600 --parity N --stop 1 --unit 1 --fc 3 --addr
 powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 ```
 
-`GuiTest.ps1` 68 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı, Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
+`GuiTest.ps1` 86 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı olmadığı (300 register 3 istek, 125 register tek istek, `0` adet ve adres taşması reddi), Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), boyutlandırma (Sizable kenarlık, Buyut kutusu, varsayılan 500×600 içerik, küçültme sınırının 500 px içeriğe inmesi, sütunların sürüklenebilir olması ve `Fill` Tanım sütunu, büyütünce tablonun uzayıp genişlemesi, logun alta yapışması, sağ butonların etikete/kenara taşmaması, büyütülmüş pencerede 200 kayıtlık parçalı okuma, ilerleme geri çağrısının okuma sonunda temizlenmesi), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
 
 ### CI
 
 `v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, `SelfTest.exe`'yi koşar ve exe'yi release asset olarak yayınlar:
 
 ```bash
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
-Yayınlanan exe'nin adı `ModbusScan-v0.6.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
+Yayınlanan exe'nin adı `ModbusScan-v0.7.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
 
 ## Dosyalar
 
@@ -153,7 +162,8 @@ Yayınlanan exe'nin adı `ModbusScan-v0.6.0.exe` olur; program tam bu adı `rele
 
 ## Bilinen sınırlar
 
-- Tek istek = en fazla 125 kayıt; büyük aralıklar için parçala.
+- **Adet sınırı yok**, ama taşıma sınırından dolayı aralık dilimlere bölünür: register okumalarında 125, bit okumalarında 2000 kayıt/istek. 300 register = 3 istek; durum satırında `300 kayıt, 600 bayt, 3 istek, 15 ms` olarak görünür. Dilimler hâlâ tek bir zaman aşımı süresine tabidir ve okuma sırasında durum satırı `Okunuyor: 125 / 300 kayıt` diye ilerler.
+- Kalan gerçek sınır adres alanıdır: `Adres + Adet ≤ 65536`. Aşarsan cihaz sorulmadan `Adres alanı 0..65535: @65500 için en fazla 36 kayıt.` yazılır. Çok büyük okumalarda tabloyu doldurmak da süreye eklenir (6000 kayıt ≈ 1 sn).
 - RS485'te veri biti sabit **8**, tek istek/tek slave; broadcast yazma, otomatik hız denemesi ve çoklu slave taraması yok.
 - RS485 zaman aşımı cihazın cevap vermemesi anlamına gelir: port açık kalır, **OKU** ile farklı adresi deneyebilirsin; **Kes** portu bırakır.
 - Seri port tek sahiplidir: aynı COM portunu başka bir program (PLC yazılımı, terminal) kullanıyorsa **Bağlan** "erişim engellendi" hatası verir.
