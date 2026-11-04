@@ -1,0 +1,5 @@
+dist/
+*.bom
+*.log
+window*.png
+render.png
