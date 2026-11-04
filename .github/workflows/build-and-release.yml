@@ -36,8 +36,9 @@ jobs:
           files: ModbusScan-${{ github.ref_name }}.exe
           generate_release_notes: true
           body: |
-            Modbus TCP okuma araci (v0.1). Kurulum gerektirmez, Windows 10/11 uzerinde dogrudan calisir.
+            Modbus TCP okuma + yazma araci, 500x600 px. Kurulum gerektirmez, Windows 10/11 uzerinde dogrudan calisir.
 
             **Indir:** `ModbusScan-${{ github.ref_name }}.exe`
 
-            Not: Bu surum yalnızca okuma yapar (FC01/02/03/04). Yazma ve tarama sonraki surumlerde.
+            Okuma: FC01/02/03/04. Yazma: FC05/FC06/FC16 - tabloda bir hucreye cift tiklayarak.
+            Ayrinti icin README.md.

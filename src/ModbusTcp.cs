@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
+using System.Text;
 
 namespace ModbusScan
 {
@@ -131,7 +132,67 @@ namespace ModbusScan
             body[2] = (byte)(address & 0xFF);
             body[3] = (byte)((value >> 8) & 0xFF);
             body[4] = (byte)(value & 0xFF);
-            return Transact(body, timeoutMs);
+
+            byte[] echo = Transact(body, timeoutMs);
+            ExpectEcho(echo, 6, address, "yazılan değer", value);
+            return echo;
+        }
+
+        /// <summary>FC05 ile tek bobin (coil) yazar; ACIK 0xFF00, KAPALI 0x0000.</summary>
+        public byte[] WriteSingleCoil(int address, bool on, int timeoutMs)
+        {
+            int value = on ? 0xFF00 : 0x0000;
+            byte[] body = new byte[5];
+            body[0] = 5;
+            body[1] = (byte)((address >> 8) & 0xFF);
+            body[2] = (byte)(address & 0xFF);
+            body[3] = (byte)((value >> 8) & 0xFF);
+            body[4] = (byte)(value & 0xFF);
+
+            byte[] echo = Transact(body, timeoutMs);
+            ExpectEcho(echo, 5, address, "durum", value);
+            return echo;
+        }
+
+        /// <summary>FC16 ile bitişik birden çok holding register yazar. data big-endian, çift uzunlukta.</summary>
+        public byte[] WriteMultipleRegisters(int address, byte[] data, int timeoutMs)
+        {
+            if (data == null || data.Length % 2 != 0)
+                throw new ArgumentException("Yazılacak bayt sayısı çift olmalı (2 bayt = 1 kelime).");
+            int quantity = data.Length / 2;
+            if (quantity < 1 || quantity > 123) throw new ArgumentException("Adet 1..123 kelime olmali.");
+
+            byte[] body = new byte[6 + data.Length];
+            body[0] = 16;
+            body[1] = (byte)((address >> 8) & 0xFF);
+            body[2] = (byte)(address & 0xFF);
+            body[3] = (byte)((quantity >> 8) & 0xFF);
+            body[4] = (byte)(quantity & 0xFF);
+            body[5] = (byte)data.Length;
+            Array.Copy(data, 0, body, 6, data.Length);
+
+            byte[] echo = Transact(body, timeoutMs);
+            if (echo.Length != 4)
+                throw new IOException("FC16 yaniti " + echo.Length + " bayt, beklenen 4.");
+            int echoAddress = (echo[0] << 8) | echo[1];
+            int echoQuantity = (echo[2] << 8) | echo[3];
+            if (echoAddress != address || echoQuantity != quantity)
+                throw new IOException("FC16 yankisi tutmadi: adres " + echoAddress + "/" + address +
+                                      ", adet " + echoQuantity + "/" + quantity + ".");
+            return echo;
+        }
+
+        private static void ExpectEcho(byte[] echo, byte functionCode, int address, string what, int value)
+        {
+            if (echo.Length != 4)
+                throw new IOException("FC" + functionCode.ToString("D2") + " yaniti " + echo.Length + " bayt, beklenen 4.");
+            int echoAddress = (echo[0] << 8) | echo[1];
+            int echoValue = (echo[2] << 8) | echo[3];
+            if (echoAddress != address)
+                throw new IOException("Yazılan adres yankisi tutmadi: " + echoAddress + " != " + address + ".");
+            if (echoValue != value)
+                throw new IOException(what + " yankisi tutmadi: gelen 0x" + echoValue.ToString("X4") +
+                                      ", yazilan 0x" + value.ToString("X4") + ".");
         }
 
         /// <summary>PDU gönderir, MBAP başlığını doğrular, fonksiyon kodu sonrası gövdeyi döndürür.</summary>
@@ -225,9 +286,70 @@ namespace ModbusScan
             return BitConverter.ToSingle(little, 0);
         }
 
+        /// <summary>mbpoll alışkanlığındaki 4xxxx / 3xxxx / 1xxxx / 0xxxx gösterim adresini üretir.</summary>
+        public static int DisplayAddress(byte functionCode, int pduAddress, bool convention)
+        {
+            if (!convention) return pduAddress;
+            switch (functionCode)
+            {
+                case 3: return pduAddress + 40001;
+                case 4: return pduAddress + 30001;
+                case 2: return pduAddress + 10001;
+                default: return pduAddress + 1;
+            }
+        }
+
         public static string FormatFloat(float value)
         {
             return value.ToString("0.000000", CultureInfo.InvariantCulture);
+        }
+
+        public static byte[] EncodeUInt16(int value)
+        {
+            return new byte[] { (byte)((value >> 8) & 0xFF), (byte)(value & 0xFF) };
+        }
+
+        public static byte[] EncodeInt16(int value)
+        {
+            return EncodeUInt16(unchecked((ushort)value));
+        }
+
+        /// <summary>
+        /// 32 bitlik değeri iki kelimeye böler. Reorder kendi tersi olduğu için (involution)
+        /// aynı fonksiyon okuma ve yazma yönünde kullanilabilir.
+        /// </summary>
+        public static byte[] EncodeUInt32(uint value, WordOrder order)
+        {
+            byte[] abcd = new byte[]
+            {
+                (byte)((value >> 24) & 0xFF), (byte)((value >> 16) & 0xFF),
+                (byte)((value >> 8) & 0xFF), (byte)(value & 0xFF)
+            };
+            return Reorder(abcd, 0, order);
+        }
+
+        public static byte[] EncodeInt32(int value, WordOrder order)
+        {
+            return EncodeUInt32(unchecked((uint)value), order);
+        }
+
+        public static byte[] EncodeFloat32(float value, WordOrder order)
+        {
+            byte[] little = BitConverter.GetBytes(value);
+            byte[] abcd = new byte[] { little[3], little[2], little[1], little[0] };
+            return Reorder(abcd, 0, order);
+        }
+
+        public static string ToHex(byte[] data)
+        {
+            if (data == null || data.Length == 0) return "";
+            StringBuilder sb = new StringBuilder(data.Length * 3);
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (i > 0) sb.Append(' ');
+                sb.Append(data[i].ToString("X2"));
+            }
+            return sb.ToString();
         }
     }
 }

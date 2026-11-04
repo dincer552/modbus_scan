@@ -29,6 +29,7 @@ internal static class SelfTest
     private static int Main()
     {
         UpdaterChecks();
+        CodecChecks();
 
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
@@ -75,6 +76,18 @@ internal static class SelfTest
             client.WriteSingleRegister(7, 0x002A, 3000);
             Check("FC06 yazma yaniti alindi", true, "");
 
+            byte[] floatBytes = ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.CDAB);
+            client.WriteMultipleRegisters(200, floatBytes, 3000);
+            Check("FC16 yazma yaniti alindi", true, "");
+
+            client.WriteSingleCoil(30, true, 3000);
+            Check("FC05 yazma yaniti alindi", true, "");
+
+            bool echoMismatch = false;
+            try { client.WriteSingleRegister(8, 0x1111, 3000); }
+            catch (IOException ex) { echoMismatch = ex.Message.Contains("yankisi"); }
+            Check("FC06 yanki uysuzlugu yakalandi", echoMismatch, "yanki kontrolu calismadi");
+
             bool countMismatch = false;
             try { client.Read(4, 0, 4, 3000); }
             catch (IOException ex) { countMismatch = ex.Message.Contains("tutars"); }
@@ -87,6 +100,55 @@ internal static class SelfTest
         _listener.Stop();
         Console.WriteLine("SONUC: " + _failures + " hata");
         return _failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>Kodlama yardimcilari ve adres gosterimi — aga/sokete ihtiyaci yok.</summary>
+    private static void CodecChecks()
+    {
+        WordOrder[] orders = new WordOrder[] { WordOrder.ABCD, WordOrder.CDAB, WordOrder.BADC, WordOrder.DCBA };
+        for (int i = 0; i < orders.Length; i++)
+        {
+            WordOrder o = orders[i];
+            byte[] f = ModbusTcpClient.EncodeFloat32(1.5f, o);
+            Check("Float32 " + o + " kodla->coz", Math.Abs(ModbusTcpClient.Float32(f, 0, o) - 1.5f) < 1e-6,
+                  "got " + ModbusTcpClient.Float32(f, 0, o) + " bayt=" + ModbusTcpClient.ToHex(f));
+            byte[] u = ModbusTcpClient.EncodeUInt32(0x11223344u, o);
+            Check("Uint32 " + o + " kodla->coz", ModbusTcpClient.UInt32(u, 0, o) == 0x11223344u,
+                  "got 0x" + ModbusTcpClient.UInt32(u, 0, o).ToString("X8"));
+            byte[] s = ModbusTcpClient.EncodeInt32(-70000, o);
+            Check("Int32 " + o + " kodla->coz", ModbusTcpClient.Int32(s, 0, o) == -70000,
+                  "got " + ModbusTcpClient.Int32(s, 0, o));
+        }
+
+        Check("ABCD 1.5 = 3F C0 00 00",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.ABCD)) == "3F C0 00 00",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.ABCD)));
+        Check("CDAB 1.5 = 00 00 3F C0",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.CDAB)) == "00 00 3F C0",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.CDAB)));
+        Check("BADC 1.5 = C0 3F 00 00",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.BADC)) == "C0 3F 00 00",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.BADC)));
+        Check("DCBA 1.5 = 00 00 C0 3F",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.DCBA)) == "00 00 C0 3F",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeFloat32(1.5f, WordOrder.DCBA)));
+
+        Check("EncodeUInt16 big-endian", ModbusTcpClient.ToHex(ModbusTcpClient.EncodeUInt16(0x1234)) == "12 34",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeUInt16(0x1234)));
+        Check("EncodeInt16 -2 = FF FE", ModbusTcpClient.ToHex(ModbusTcpClient.EncodeInt16(-2)) == "FF FE",
+              ModbusTcpClient.ToHex(ModbusTcpClient.EncodeInt16(-2)));
+        Check("ToHex bos dizi", ModbusTcpClient.ToHex(new byte[0]) == "" && ModbusTcpClient.ToHex(null) == "", "bos degil");
+
+        Check("DisplayAddress FC03 4xxxx", ModbusTcpClient.DisplayAddress(3, 10, true) == 40011,
+              "got " + ModbusTcpClient.DisplayAddress(3, 10, true));
+        Check("DisplayAddress FC04 3xxxx", ModbusTcpClient.DisplayAddress(4, 2, true) == 30003,
+              "got " + ModbusTcpClient.DisplayAddress(4, 2, true));
+        Check("DisplayAddress FC02 1xxxx", ModbusTcpClient.DisplayAddress(2, 2, true) == 10003,
+              "got " + ModbusTcpClient.DisplayAddress(2, 2, true));
+        Check("DisplayAddress FC01 0xxxx", ModbusTcpClient.DisplayAddress(1, 5, true) == 6,
+              "got " + ModbusTcpClient.DisplayAddress(1, 5, true));
+        Check("DisplayAddress PDU modu", ModbusTcpClient.DisplayAddress(3, 10, false) == 10,
+              "got " + ModbusTcpClient.DisplayAddress(3, 10, false));
     }
 
     private static void UpdaterChecks()
@@ -207,6 +269,29 @@ internal static class SelfTest
                 Check("Istek FC06 degeri 0x002A", ((pdu[3] << 8) | pdu[4]) == 0x002A,
                       "val=" + ((pdu[3] << 8) | pdu[4]));
                 Send(s, 3, new byte[] { 6, pdu[1], pdu[2], pdu[3], pdu[4] });
+
+                pdu = NextRequest(s);
+                Check("Istek FC16", pdu[0] == 16, "fc=" + pdu[0]);
+                Check("Istek FC16 adresi 200", ((pdu[1] << 8) | pdu[2]) == 200,
+                      "addr=" + ((pdu[1] << 8) | pdu[2]));
+                Check("Istek FC16 adedi 2", ((pdu[3] << 8) | pdu[4]) == 2, "qty=" + ((pdu[3] << 8) | pdu[4]));
+                Check("Istek FC16 byte count 4", pdu[5] == 4, "bc=" + pdu[5]);
+                Check("Istek FC16 verisi CDAB 1.5",
+                      pdu[6] == 0x00 && pdu[7] == 0x00 && pdu[8] == 0x3F && pdu[9] == 0xC0,
+                      "data=" + ModbusTcpClient.ToHex(new byte[] { pdu[6], pdu[7], pdu[8], pdu[9] }));
+                Send(s, 3, new byte[] { 16, pdu[1], pdu[2], pdu[3], pdu[4] });
+
+                pdu = NextRequest(s);
+                Check("Istek FC05", pdu[0] == 5, "fc=" + pdu[0]);
+                Check("Istek FC05 adresi 30", ((pdu[1] << 8) | pdu[2]) == 30, "addr=" + ((pdu[1] << 8) | pdu[2]));
+                Check("Istek FC05 ACIK 0xFF00", ((pdu[3] << 8) | pdu[4]) == 0xFF00,
+                      "val=0x" + ((pdu[3] << 8) | pdu[4]).ToString("X4"));
+                Send(s, 3, new byte[] { 5, pdu[1], pdu[2], 0xFF, 0x00 });
+
+                pdu = NextRequest(s);
+                Check("Istek FC06 (kotu yanki senaryosu)", pdu[0] == 6 && pdu[3] == 0x11,
+                      "fc=" + pdu[0] + " v=" + pdu[3].ToString("X2"));
+                Send(s, 3, new byte[] { 6, pdu[1], pdu[2], 0x22, 0x22 });
 
                 NextRequest(s);
                 Send(s, 3, new byte[] { 4, 6, 0x00, 0x01 });

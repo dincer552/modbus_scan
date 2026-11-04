@@ -43,6 +43,80 @@ function Set-Combo($Form, [string]$Field, [int]$Index) {
     Get-Field $Form $Field | ForEach-Object { $_.SelectedIndex = $Index }
 }
 
+function Assert([bool]$Ok, [string]$Name, [string]$Detail) {
+    if ($Ok) {
+        Write-Host ('GECTI  ' + $Name)
+    } else {
+        $script:fail++
+        Write-Host ('KALDI  ' + $Name + ' -> ' + $Detail)
+    }
+}
+
+# Yazma popup'ini modal dongu icinden surer: zamanlayici dialogu bulur, degeri yazar, kapatir.
+function Invoke-GridDoubleClick($Form, [int]$Row) {
+    # Olay yoneticisi (CellContentDoubleClick) ayni metodun kisa hali; int parametreyle cagirmak yeterli.
+    $method = $Form.GetType().GetMethod('OpenWriteDialog', $flags)
+    $method.Invoke($Form, @($Row)) | Out-Null
+}
+
+function Dialog-Write {
+    param(
+        $Form, [int]$Function, [int]$Addr, [int]$Qty, [int]$Row,
+        [int]$TypeIndex, [string]$Value, [int]$WordIndex = 0, [int]$CoilIndex = -1
+    )
+
+    Set-Combo $Form 'cmbFunction' $Function
+    (Get-Field $Form 'txtAddress').Text = "$Addr"
+    (Get-Field $Form 'txtQuantity').Text = "$Qty"
+    Invoke-Handler $Form 'OnRead'
+
+    $script:rowsBefore = @(Get-GridRows $Form)
+    if ($script:rowsBefore.Count -le $Row) { throw "yazma satiri yok: satir=$Row toplam=$($script:rowsBefore.Count)" }
+
+    $script:typeIndex = $TypeIndex
+    $script:value = $Value
+    $script:wordIndex = $WordIndex
+    $script:coilIndex = $CoilIndex
+    $script:dlg = [ordered]@{ Acildi = $false; Alan = ''; Mevcut = ''; Onizleme = ''; Sonuc = ''; YazPasif = $false; Ipucu = '' }
+
+    $probe = New-Object System.Windows.Forms.Timer
+    $probe.Interval = 350
+    $probe.Add_Tick({
+        $probe.Stop()
+        $dlg = $null
+        foreach ($f in [System.Windows.Forms.Application]::OpenForms) {
+            if ($f.GetType().Name -eq 'WriteDialog') { $dlg = $f; break }
+        }
+        if ($null -eq $dlg) { return }
+        $script:dlg['Acildi'] = $true
+        $d = Get-Field $dlg 'lblArea'
+        $script:dlg['Alan'] = [string]$d.Text
+        $script:dlg['Mevcut'] = [string](Get-Field $dlg 'lblCurrent').Text
+        $script:dlg['Ipucu'] = [string](Get-Field $dlg 'lblHint').Text
+
+        (Get-Field $dlg 'cmbType').SelectedIndex = $script:typeIndex
+        if ($script:coilIndex -ge 0) {
+            (Get-Field $dlg 'cmbCoil').SelectedIndex = $script:coilIndex
+        } else {
+            (Get-Field $dlg 'txtValue').Text = $script:value
+        }
+        (Get-Field $dlg 'cmbWord').SelectedIndex = $script:wordIndex
+        $script:dlg['Onizleme'] = [string](Get-Field $dlg 'lblPreview').Text
+
+        $btnWrite = Get-Field $dlg 'btnWrite'
+        $script:dlg['YazPasif'] = -not $btnWrite.Enabled
+        if ($btnWrite.Enabled) { $btnWrite.PerformClick() }
+        $script:dlg['Sonuc'] = [string](Get-Field $dlg 'lblResult').Text
+        (Get-Field $dlg 'btnClose').PerformClick()
+    })
+    $probe.Start()
+    Invoke-GridDoubleClick $Form $Row
+    $probe.Dispose()
+
+    $script:dlg['SonrakiSatirlar'] = @(Get-GridRows $Form)
+    return $script:dlg
+}
+
 $fail = 0
 $form = [Activator]::CreateInstance($type)
 (Get-Field $form 'txtIp').Text = '127.0.0.1'
@@ -102,6 +176,45 @@ foreach ($case in $cases) {
     }
 }
 
+# --- Yazma popup'i: hucreye cift tiklama senaryolari (ayni baglanti uzerinde kalir) ---
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 6 -Qty 4 -Row 0 -TypeIndex 0 -Value '777'
+Assert ($d['Acildi'] -and $d['Alan'] -like '*40007*' -and $d['Alan'] -like '*PDU 6*') `
+    'cift tiklama dialogu acildi + adres dogru' ($d['Alan'])
+Assert ($d['Onizleme'] -like 'FC06 @6*03 09*') 'Uint16 onizleme baytlari' $d['Onizleme']
+Assert ($d['Sonuc'] -like 'OK*Geri okundu: 03 09 = 777*') 'Uint16 yazma + geri okuma' $d['Sonuc']
+Assert (@($d['SonrakiSatirlar'][0] -split '\|')[5].Trim() -eq '777') 'tablo yazma sonrasi tazelendi' $d['SonrakiSatirlar'][0]
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 6 -Qty 4 -Row 0 -TypeIndex 3 -Value '2.25'
+Assert ($d['Onizleme'] -like 'FC16 @6 x2*40 10 00 00*') 'Float32 FC16 onizleme' $d['Onizleme']
+Assert ($d['Sonuc'] -like 'OK*40 10 00 00 = 2.250000 (ABCD)*') 'Float32 yazma + geri okuma' $d['Sonuc']
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 8 -Qty 2 -Row 0 -TypeIndex 1 -Value '-5'
+Assert ($d['Onizleme'] -like '*FF FB*') 'Int16 negatif onizleme' $d['Onizleme']
+Assert ($d['Sonuc'] -like 'OK*FF FB = 65531 (int16 -5)*') 'Int16 yazma + geri okuma' $d['Sonuc']
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 16 -Qty 4 -Row 0 -TypeIndex 3 -Value '2.25' -WordIndex 1
+Assert ($d['Onizleme'] -like '*00 00 40 10*') 'Float32 CDAB onizleme' $d['Onizleme']
+Assert ($d['Sonuc'] -like 'OK*(CDAB)*') 'Float32 CDAB yazma' $d['Sonuc']
+
+$d = Dialog-Write -Form $form -Function 2 -Addr 0 -Qty 12 -Row 0 -TypeIndex 0 -Value '' -CoilIndex 1
+Assert ($d['Alan'] -like 'Coil*00001*' -or $d['Alan'] -like 'Coil*1 *') 'coil dialog adresi' $d['Alan']
+Assert ($d['Onizleme'] -like 'FC05 @0*KAPALI*') 'coil FC05 onizleme' $d['Onizleme']
+Assert ($d['Sonuc'] -like 'OK*Geri okundu: KAPALI (0)*') 'coil yazma + geri okuma' $d['Sonuc']
+Assert (@($d['SonrakiSatirlar'][0] -split '\|')[5].Trim() -eq '0') 'coil sonrasi tablo 0 gosteriyor' $d['SonrakiSatirlar'][0]
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 20 -Qty 1 -Row 0 -TypeIndex 0 -Value '5'
+Assert ($d['Sonuc'] -like 'HATA*hata kodu 02*') 'hata yaniti dialogda goruntulendi' $d['Sonuc']
+
+$d = Dialog-Write -Form $form -Function 0 -Addr 3 -Qty 1 -Row 0 -TypeIndex 0 -Value '70000'
+Assert ($d['Onizleme'] -like '*65535*' -and $d['YazPasif']) 'gecersiz deger: onizleme + Yaz pasif' ($d['Onizleme'] + ' / yazPasif=' + $d['YazPasif'])
+
+$d = Dialog-Write -Form $form -Function 1 -Addr 2 -Qty 4 -Row 0 -TypeIndex 0 -Value '5'
+Assert ($d['YazPasif'] -and $d['Ipucu'] -like '*salt okunur*') 'input register: Yaz pasif + uyarı' ($d['Ipucu'])
+
+$log = [string](Get-Field $form 'txtLog').Text
+Assert ($log -like '*YAZMA FC06*' -and $log -like '*YAZMA FC16*' -and $log -like '*YAZMA FC05*') `
+    'yazmalar ana loga yazildi' ($log -replace "`r?`n", ' / ')
 $form.Close()
 
 # --- Guncelleme seridi: durum makinesi yansitmaya dogrudan surulur (aga gidilmez) ---

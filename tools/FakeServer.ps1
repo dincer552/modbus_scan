@@ -7,6 +7,7 @@
 $ErrorActionPreference = 'Stop'
 
 $script:Holding = New-Object 'byte[]' 40
+$script:Coils = @{}
 function Set-Reg([int]$Index, [int]$Value) {
     $script:Holding[$Index * 2] = [byte](($Value -shr 8) -band 0xFF)
     $script:Holding[$Index * 2 + 1] = [byte]($Value -band 0xFF)
@@ -75,7 +76,9 @@ function Get-Slice16([int]$Start, [int]$Qty, [byte[]]$Source) {
 function Get-Bits([int]$Start, [int]$Qty) {
     $bytes = New-Object 'byte[]' ([int][Math]::Ceiling($Qty / 8.0))
     for ($i = 0; $i -lt $Qty; $i++) {
-        $bit = (($Start + $i) % 3) -eq 0
+        $index = $Start + $i
+        if ($script:Coils.ContainsKey($index)) { $bit = [int]$script:Coils[$index] -eq 1 }
+        else { $bit = ($index % 3) -eq 0 }
         if ($bit) {
             $byteIndex = [int][Math]::Floor($i / 8)
             $bytes[$byteIndex] = $bytes[$byteIndex] -bor (1 -shl ($i % 8))
@@ -84,10 +87,16 @@ function Get-Bits([int]$Start, [int]$Qty) {
     return $bytes
 }
 
+function Set-Holding([int]$Address, [int]$Value) {
+    if ($Address * 2 + 1 -ge $script:Holding.Length) { return $false }
+    Set-Reg $Address $Value
+    return $true
+}
+
 $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
 $listener.Start()
 Write-Host "SAhte Modbus TCP sunucusu 127.0.0.1:$Port uzerinde dinliyor (unit $UnitId)."
-Write-Host "FC03/04 => holding, FC01/02 => bit deseni, adres >= 9000 => exception 2."
+Write-Host "FC03/04 => holding, FC01/02 => bit deseni, FC05/06/16 => yazilir ve saklanir, adres >= 9000 => exception 2."
 
 try {
     while ($true) {
@@ -117,7 +126,43 @@ try {
                 } elseif ($fc -in 1, 2) {
                     $resp = Build-ReadResponse $fc (Get-Bits $addr $qty)
                 } elseif ($fc -eq 6) {
-                    $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
+                    $value = ([int]$pdu[3] -shl 8) -bor [int]$pdu[4]
+                    if (Set-Holding $addr $value) {
+                        Write-Host ("  WRITE FC06 @{0} = 0x{1:X4}" -f $addr, $value)
+                        $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
+                    } else {
+                        $resp = Build-Error $fc 2
+                    }
+                } elseif ($fc -eq 5) {
+                    $value = ([int]$pdu[3] -shl 8) -bor [int]$pdu[4]
+                    if ($value -eq 0xFF00) {
+                        $script:Coils[$addr] = 1
+                        Write-Host ("  WRITE FC05 @{0} = ACIK" -f $addr)
+                        $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
+                    } elseif ($value -eq 0x0000) {
+                        $script:Coils[$addr] = 0
+                        Write-Host ("  WRITE FC05 @{0} = KAPALI" -f $addr)
+                        $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
+                    } else {
+                        $resp = Build-Error $fc 3
+                    }
+                } elseif ($fc -eq 16) {
+                    $byteCount = [int]$pdu[5]
+                    if ($qty -lt 1 -or $qty -gt 123 -or $byteCount -ne ($qty * 2)) {
+                        $resp = Build-Error $fc 3
+                    } else {
+                        $ok = $true
+                        for ($i = 0; $i -lt $qty; $i++) {
+                            $value = ([int]$pdu[6 + $i * 2] -shl 8) -bor [int]$pdu[7 + $i * 2]
+                            if (-not (Set-Holding ($addr + $i) $value)) { $ok = $false }
+                        }
+                        if ($ok) {
+                            Write-Host ("  WRITE FC16 @{0} x{1}" -f $addr, $qty)
+                            $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
+                        } else {
+                            $resp = Build-Error $fc 2
+                        }
+                    }
                 } else {
                     $resp = Build-Error $fc 1
                 }

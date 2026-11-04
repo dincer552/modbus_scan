@@ -189,6 +189,7 @@ namespace ModbusScan
             grid.Columns.Add(NewColumn("colDec", "uint", 50, DataGridViewAutoSizeColumnMode.None));
             grid.Columns.Add(NewColumn("colSigned", "int", 50, DataGridViewAutoSizeColumnMode.None));
             grid.Columns.Add(NewColumn("colValue", "Değer", 130, DataGridViewAutoSizeColumnMode.Fill));
+            grid.CellContentDoubleClick += OnGridCellDoubleClick;
 
             txtLog = new TextBox();
             txtLog.SetBounds(8, 478, 484, 114);
@@ -373,6 +374,57 @@ namespace ModbusScan
                 " → " + read.Data.Length + " bayt, " + read.ElapsedMilliseconds + " ms");
         }
 
+        /// <summary>Hücreye çift tıklayınca o kaydın yazma penceresini açar.</summary>
+        private void OnGridCellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            OpenWriteDialog(e.RowIndex);
+        }
+
+        private void OpenWriteDialog(int rowIndex)
+        {
+            if (rowIndex < 0 || _lastRead == null) return;
+
+            if (!_client.IsConnected)
+            {
+                lblSummary.ForeColor = Color.Firebrick;
+                lblSummary.Text = "Yazmak için önce Bağlan gerekiyor.";
+                return;
+            }
+
+            RegisterRead read = _lastRead;
+            int address = read.StartAddress + rowIndex;
+            byte[] current = CurrentBytesOfRow(read, rowIndex);
+
+            int timeoutMs;
+            if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100) timeoutMs = 2000;
+
+            using (WriteDialog dialog = new WriteDialog(_client, read.FunctionCode, address,
+                                                        current, chkConvention.Checked, timeoutMs))
+            {
+                dialog.ShowDialog(this);
+                if (dialog.WritePerformed)
+                {
+                    Log("YAZMA FC" + dialog.WrittenFunctionCode.ToString("D2") +
+                        " @" + address + " başarılı, tablo tazeleniyor.");
+                    OnRead(this, EventArgs.Empty);
+                }
+            }
+        }
+
+        private static byte[] CurrentBytesOfRow(RegisterRead read, int rowIndex)
+        {
+            if (read.BytesPerItem == 1)
+            {
+                int byteIndex = rowIndex / 8;
+                if (byteIndex >= read.Data.Length) return new byte[0];
+                int bit = (read.Data[byteIndex] >> (rowIndex % 8)) & 1;
+                return new byte[] { (byte)bit };
+            }
+            int offset = rowIndex * 2;
+            if (offset + 1 >= read.Data.Length) return new byte[0];
+            return new byte[] { read.Data[offset], read.Data[offset + 1] };
+        }
+
         private static string ShortMessage(Exception ex)
         {
             string m = ex.Message.Replace("\r", " ").Replace("\n", " ");
@@ -441,17 +493,7 @@ namespace ModbusScan
                     }
                 }
 
-                int displayAddress = baseAddress + i;
-                if (chkConvention.Checked)
-                {
-                    switch (read.FunctionCode)
-                    {
-                        case 3: displayAddress += 40001; break;
-                        case 4: displayAddress += 30001; break;
-                        case 2: displayAddress += 10001; break;
-                        default: displayAddress += 1; break;
-                    }
-                }
+                int displayAddress = ModbusTcpClient.DisplayAddress(read.FunctionCode, baseAddress + i, chkConvention.Checked);
 
                 grid.Rows.Add(new object[] {
                     i.ToString(), displayAddress.ToString(), hex, dec, signed, value
@@ -460,7 +502,7 @@ namespace ModbusScan
 
             grid.ResumeLayout();
             lblSummary.Text = read.Quantity + " kayıt, " + read.Data.Length + " bayt, " +
-                              read.ElapsedMilliseconds + " ms";
+                              read.ElapsedMilliseconds + " ms · hücreye çift tık: yaz";
         }
 
         private RegisterRead _lastRead;
