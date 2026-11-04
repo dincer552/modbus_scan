@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO.Ports;
 using System.Text;
 using ModbusScan;
 
@@ -7,7 +8,8 @@ internal static class Probe
     private static int Main(string[] args)
     {
         string ip = "127.0.0.1";
-        int port = 502, address = 0, quantity = 10, timeout = 2000;
+        string com = null, parity = "N", stop = "1";
+        int port = 502, baud = 9600, address = 0, quantity = 10, timeout = 2000;
         byte fc = 3, unit = 1;
         WordOrder order = WordOrder.ABCD;
 
@@ -15,8 +17,19 @@ internal static class Probe
         {
             switch (args[i])
             {
+                case "--list-ports":
+                    {
+                        string[] found = SerialPort.GetPortNames();
+                        Array.Sort(found);
+                        Console.WriteLine("ports=" + string.Join(",", found));
+                        return 0;
+                    }
                 case "--ip": ip = args[++i]; break;
                 case "--port": port = int.Parse(args[++i]); break;
+                case "--com": com = args[++i]; break;
+                case "--baud": baud = int.Parse(args[++i]); break;
+                case "--parity": parity = args[++i]; break;
+                case "--stop": stop = args[++i]; break;
                 case "--unit": unit = byte.Parse(args[++i]); break;
                 case "--fc": fc = byte.Parse(args[++i]); break;
                 case "--addr": address = int.Parse(args[++i]); break;
@@ -29,10 +42,15 @@ internal static class Probe
 
         try
         {
-            using (ModbusTcpClient client = new ModbusTcpClient())
+            ModbusClient client = com == null ? (ModbusClient)new ModbusTcpClient() : new ModbusRtuClient();
+            using (client)
             {
                 client.UnitId = unit;
-                client.Connect(ip, port, timeout);
+                ModbusTcpClient tcp = client as ModbusTcpClient;
+                if (tcp != null) tcp.Connect(ip, port, timeout);
+                else ((ModbusRtuClient)client).Connect(com, baud, ParityOf(parity), 8, StopOf(stop), timeout);
+
+                Console.WriteLine("baglanti=" + client.Description);
                 RegisterRead read = client.Read(fc, address, quantity, timeout);
 
                 Console.WriteLine("data=" + read.Data.Length + " bytes");
@@ -78,6 +96,28 @@ internal static class Probe
         {
             Console.Error.WriteLine("HATA: " + ex.Message);
             return 1;
+        }
+    }
+
+    private static Parity ParityOf(string text)
+    {
+        switch (text.ToUpperInvariant())
+        {
+            case "O": case "ODD": return Parity.Odd;
+            case "E": case "EVEN": return Parity.Even;
+            case "N": case "NONE": return Parity.None;
+            default: throw new ArgumentException("Parite N/O/E olmalı: " + text);
+        }
+    }
+
+    private static StopBits StopOf(string text)
+    {
+        switch (text)
+        {
+            case "1": return StopBits.One;
+            case "1.5": return StopBits.OnePointFive;
+            case "2": return StopBits.Two;
+            default: throw new ArgumentException("Durdurma biti 1/1.5/2 olmalı: " + text);
         }
     }
 }

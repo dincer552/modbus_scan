@@ -48,43 +48,20 @@ namespace ModbusScan
         public int BytesPerItem;
     }
 
-    /// <summary>Modbus TCP (MBAP) istemcisi. Ham soket uzerinden, hicbir ek kutuphane kullanmadan calisir.</summary>
-    public class ModbusTcpClient : IDisposable
+    /// <summary>
+    /// Taşımadan bağımsız Modbus istemcisi: PDU kurma, yanıt çözme ve kodlama burada.
+    /// TCP (MBAP) ve seri (RTU) çerçeveleme farklı Transact uygulamalarında yaşar.
+    /// </summary>
+    public abstract class ModbusClient : IDisposable
     {
-        private TcpClient _tcp;
-        private NetworkStream _net;
-        private ushort _transaction = 0;
-
         public byte UnitId = 1;
 
-        public bool IsConnected
-        {
-            get { return _tcp != null && _tcp.Connected; }
-        }
+        public abstract bool IsConnected { get; }
 
-        public void Connect(string host, int port, int timeoutMs)
-        {
-            Close();
-            TcpClient client = new TcpClient();
-            IAsyncResult ar = client.BeginConnect(host, port, null, null);
-            bool ok = ar.AsyncWaitHandle.WaitOne(timeoutMs, true);
-            if (!ok)
-            {
-                client.Close();
-                throw new TimeoutException("Baglanma zaman asimi: " + host + ":" + port + " (" + timeoutMs + " ms)");
-            }
-            client.EndConnect(ar);
-            client.NoDelay = true;
-            _tcp = client;
-            _net = client.GetStream();
-            _transaction = 0;
-        }
+        /// <summary>Durum satırında gösterilen bağlantı tanımı (ip:port veya COM3 9600 8N1).</summary>
+        public abstract string Description { get; }
 
-        public void Close()
-        {
-            if (_net != null) { _net.Close(); _net = null; }
-            if (_tcp != null) { _tcp.Close(); _tcp = null; }
-        }
+        public abstract void Close();
 
         public void Dispose() { Close(); }
 
@@ -195,57 +172,11 @@ namespace ModbusScan
                                       ", yazilan 0x" + value.ToString("X4") + ".");
         }
 
-        /// <summary>PDU gönderir, MBAP başlığını doğrular, fonksiyon kodu sonrası gövdeyi döndürür.</summary>
-        private byte[] Transact(byte[] pdu, int timeoutMs)
-        {
-            if (!IsConnected) throw new InvalidOperationException("Bağlantı yok.");
-
-            _transaction = (ushort)(_transaction + 1);
-            int length = pdu.Length + 1;
-
-            byte[] frame = new byte[7 + pdu.Length];
-            frame[0] = (byte)((_transaction >> 8) & 0xFF);
-            frame[1] = (byte)(_transaction & 0xFF);
-            frame[2] = 0; frame[3] = 0;
-            frame[4] = (byte)((length >> 8) & 0xFF);
-            frame[5] = (byte)(length & 0xFF);
-            frame[6] = UnitId;
-            Array.Copy(pdu, 0, frame, 7, pdu.Length);
-
-            _net.ReadTimeout = timeoutMs;
-            _net.WriteTimeout = timeoutMs;
-            _net.Write(frame, 0, frame.Length);
-
-            byte[] head = ReadExact(8);
-            ushort rid = (ushort)((head[0] << 8) | head[1]);
-            if (rid != _transaction)
-                throw new IOException("Transaction id uymadı (beklenen " + _transaction + ", gelen " + rid + ").");
-            int rlen = (head[4] << 8) | head[5];
-            if (head[6] != UnitId)
-                throw new IOException("Unit id uymadı (beklenen " + UnitId + ", gelen " + head[6] + ").");
-
-            byte sentFunction = pdu[0];
-            byte gotFunction = head[7];
-
-            if (gotFunction == (byte)(sentFunction | 0x80))
-                throw new ModbusException(sentFunction, ReadExact(1)[0]);
-
-            if (rlen < 2) return new byte[0];
-            return ReadExact(rlen - 2);
-        }
-
-        private byte[] ReadExact(int count)
-        {
-            byte[] buf = new byte[count];
-            int off = 0;
-            while (off < count)
-            {
-                int n = _net.Read(buf, off, count - off);
-                if (n <= 0) throw new IOException("Baglanti sunucu tarafindan kapatildi.");
-                off += n;
-            }
-            return buf;
-        }
+        /// <summary>
+        /// PDU'yu taşımaya özgü çerçeveye sarıp yanıt gövdesini (fonksiyon kodu sonrası,
+        /// CRC/MBAP hariç) döndürür. Modbus exception'ı ModbusException olarak fırlatılır.
+        /// </summary>
+        protected abstract byte[] Transact(byte[] pdu, int timeoutMs);
 
         public static int UInt16(byte[] d, int i) { return (d[i] << 8) | d[i + 1]; }
 
@@ -350,6 +281,100 @@ namespace ModbusScan
                 sb.Append(data[i].ToString("X2"));
             }
             return sb.ToString();
+        }
+    }
+
+    /// <summary>Modbus TCP (MBAP) istemcisi. Ham soket uzerinden, hicbir ek kutuphane kullanmadan calisir.</summary>
+    public class ModbusTcpClient : ModbusClient
+    {
+        private TcpClient _tcp;
+        private NetworkStream _net;
+        private ushort _transaction = 0;
+        private string _description = "";
+
+        public override bool IsConnected
+        {
+            get { return _tcp != null && _tcp.Connected; }
+        }
+
+        public override string Description { get { return _description; } }
+
+        public void Connect(string host, int port, int timeoutMs)
+        {
+            Close();
+            TcpClient client = new TcpClient();
+            IAsyncResult ar = client.BeginConnect(host, port, null, null);
+            bool ok = ar.AsyncWaitHandle.WaitOne(timeoutMs, true);
+            if (!ok)
+            {
+                client.Close();
+                throw new TimeoutException("Baglanma zaman asimi: " + host + ":" + port + " (" + timeoutMs + " ms)");
+            }
+            client.EndConnect(ar);
+            client.NoDelay = true;
+            _tcp = client;
+            _net = client.GetStream();
+            _transaction = 0;
+            _description = host + ":" + port;
+        }
+
+        public override void Close()
+        {
+            if (_net != null) { _net.Close(); _net = null; }
+            if (_tcp != null) { _tcp.Close(); _tcp = null; }
+            _description = "";
+        }
+
+        /// <summary>PDU gönderir, MBAP başlığını doğrular, fonksiyon kodu sonrası gövdeyi döndürür.</summary>
+        protected override byte[] Transact(byte[] pdu, int timeoutMs)
+        {
+            if (!IsConnected) throw new InvalidOperationException("Bağlantı yok.");
+
+            _transaction = (ushort)(_transaction + 1);
+            int length = pdu.Length + 1;
+
+            byte[] frame = new byte[7 + pdu.Length];
+            frame[0] = (byte)((_transaction >> 8) & 0xFF);
+            frame[1] = (byte)(_transaction & 0xFF);
+            frame[2] = 0; frame[3] = 0;
+            frame[4] = (byte)((length >> 8) & 0xFF);
+            frame[5] = (byte)(length & 0xFF);
+            frame[6] = UnitId;
+            Array.Copy(pdu, 0, frame, 7, pdu.Length);
+
+            _net.ReadTimeout = timeoutMs;
+            _net.WriteTimeout = timeoutMs;
+            _net.Write(frame, 0, frame.Length);
+
+            byte[] head = ReadExact(8);
+            ushort rid = (ushort)((head[0] << 8) | head[1]);
+            if (rid != _transaction)
+                throw new IOException("Transaction id uymadı (beklenen " + _transaction + ", gelen " + rid + ").");
+            int rlen = (head[4] << 8) | head[5];
+            if (head[6] != UnitId)
+                throw new IOException("Unit id uymadı (beklenen " + UnitId + ", gelen " + head[6] + ").");
+
+            byte sentFunction = pdu[0];
+            byte gotFunction = head[7];
+
+            if (gotFunction == (byte)(sentFunction | 0x80))
+                throw new ModbusException(sentFunction, ReadExact(1)[0]);
+
+            if (rlen < 2) return new byte[0];
+            return ReadExact(rlen - 2);
+        }
+
+        private byte[] ReadExact(int count)
+        {
+            byte[] buf = new byte[count];
+            int off = 0;
+            while (off < count)
+            {
+                int n = _net.Read(buf, off, count - off);
+                if (n <= 0) throw new IOException("Baglanti sunucu tarafindan kapatildi.");
+                off += n;
+            }
+            return buf;
         }
     }
 }

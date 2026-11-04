@@ -1,6 +1,6 @@
 # ModbusScan
 
-Kompakt (500 × 600 px) bir **Modbus TCP test aracı**. `mbpoll`ün okuma tarafını, tek bir `.exe` ve kurulum derdi olmadan sunar.
+Kompakt (500 × 600 px) bir **Modbus test aracı**. `mbpoll`ün okuma tarafını, tek bir `.exe` ve kurulum derdi olmadan sunar; **Modbus TCP** ve **Modbus RTU (RS485/seri)** olmak üzere iki bağlantı modu vardır.
 
 Okuma: FC01 (coil), FC02 (discrete input), FC03 (holding register), FC04 (input register).
 Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda bir hücreye çift tıklayarak.
@@ -16,13 +16,29 @@ Ek bir şey kurmana gerek yok — Windows 10/11'de gelen .NET Framework 4.8 ile 
 
 ## Kullanım
 
-1. **IP / Port / ID / ms**: cihazın veya gateway'in adresi. Port genelde `502`, zaman aşımı `2000` ms.
-2. **Bağlan** → durum satırı yeşile döner.
+1. **Bağlantı kutusunun başlığındaki seçim**: `TCP` → IP/Port/ID/ms, `RS485` → COM/hız/parite/durdurma/ID/ms. Bağlantı kurulduktan sonra seçim kilitlenir; değiştirmek için önce **Kes**.
+2. **Bağlan** → durum satırı yeşile döner (`Durum: bağlı → 10.90.38.24:502` veya `Durum: bağlı → COM3 9600 8N1`).
 3. **Fonksiyon** seç, **Adres** (PDU, 0 tabanlı) ve **Adet** (1–125) gir, **OKU**.
 4. Tablo dört sütun gösterir: **#** (satıra yazdığın tanım), **Adres**, **Değer** (seçtiğin çözümleme) ve **Tanım** (senin notun).
    - **Değer** sütunu, yukarıdaki **Değer** kutusundaki çözümlemeyi kullanır: `Ondalık (uint16)`, `İşaretli (int16)`, `Hex`, `Float32`, `Uint32`, `Int32`. Ham hex görmek istersen çözümlemeyi `Hex` seç.
    - **4xxxx göster** işaretliyken adresler mbpoll alışkanlığıyla `40001 / 30001 / 10001 / 00001` biçiminde yazılır; kaldırırsan düz PDU adresi görürsün.
    - **Değer** kutusundan `Float32 / Uint32 / Int32` seçince **Kelime** kutusu açılır: `ABCD` (big-endian), `CDAB` (word swap), `BADC` (byte swap), `DCBA` (little-endian).
+
+## RS485 (Modbus RTU) bağlantısı
+
+![Bağlantı kutusunda RS485 seçimi: COM, Hz, Par, Dur, ID, ms](docs/rs485-modu.png)
+
+Seçimi `RS485` yapınca kutunun içeriği seri ayarlara döner; okuma/yazma tarafı aynı kalır, sadece taşıma değişir.
+
+- **COM**: sistemdeki portlar listelenir (COM1, COM2, … sayı sırasıyla). Dönüştürücüyü taktı-çıktıysan kutuyu açtığın an liste yenilenir. Port seçilmezse **Bağlan** `COM port bulunamadı` diye log'a yazar ve denemeye bırakır.
+- **Hz**: 1200 … 115200; varsayılan `9600`. **Par**: `Yok / Tek / Çift` (None/Odd/Even). **Dur**: `1 / 1.5 / 2`. Veri biti Modbus RTU standardı gereği sabit **8**'dir; özet `8N1` olarak görünür.
+- **ID**: RTU'da **slave (cihaz) adresi** — TCP'deki unit id ile aynı alan, 1..247 kullanılır, `0` broadcast'tır (bu araç broadcast yapmaz).
+- **ms**: yanıt bekleme süresi. RS485'te cihaz cevap vermezse `Yanıt gelmedi (2000 ms) — cihaz adresi, hız ve pariteyi kontrol et` yazar; port açık kalır, doğru adresi deneyene kadar bağlantıyı koparmaz.
+- Çerçeve `birim id + PDU + CRC16` (düşük bayt önce) biçimindedir. CRC tutmazsa `CRC hatalı: beklenen X, gelen Y (gürültü, yanlış hız veya parite olabilir)`, başka bir cihaz cevap verirse `Birim id uyuşmadı (beklenen 1, gelen 14)` satırını görürsün. Yarım kalan yanıt okuma tamponundan atılır, bir sonraki istek bozulmaz.
+- **Bağlan** hatası genellikle şunlardır: port başka programda (`UnauthorizedAccessException` → `Bağlantı hatası: Erişim engellendi…`), sürücü yok (`Bağlantı hatası: … bulunamadı`) veya USB dönüştürücü uyku modunda.
+- USB-RS485 adaptörlerinin çoğu için DTR/RTS açık tutulur; otomatik yönlendirmeli (auto-direction) adaptörlerde bu zaten gereksizdir ama zararsızdır.
+
+> RS485 hattı yarım dupleks ve çok noktalıdır: aynı porta aynı anda başka bir program bağlanamaz, başka slave'ler de cevap verirse CRC/birim id hataları görürsün.
 
 ## Tanım sütunu (Excel'den yapıştır)
 
@@ -37,7 +53,7 @@ Kayıtların adını programın kendisi değil **sen** belirlersin: **Tanım** s
 
 ## Hücreye çift tıkla → yaz
 
-Okuma tablosundaki bir **Değer** hücresine çift tıklayınca yazma penceresi açılır. Pencere, o satırın gerçek PDU adresini ve okunan ham baytları temel alır; bağlantı kopuksa veya henüz okuma yoksa açılmaz.
+Okuma tablosundaki bir **Değer** hücresine çift tıklayınca yazma penceresi açılır. Pencere, o satırın gerçek PDU adresini ve okunan ham baytları temel alır; bağlantı kopuksa veya henüz okuma yoksa açılmaz. Cihaz **RS485**'e bağlıysa yazma aynen çalışır: tek fark, çerçevenin MBAP yerine CRC16 ile taşınmasıdır.
 
 ![Hücreye çift tıklayınca açılan yazma penceresi](docs/write-dialog.png)
 
@@ -57,8 +73,8 @@ Pencerede gönderilecek baytlar **önizleme** satırında görünür — örn. `
 Pencerenin altındaki şerit programın kendi güncelliğini takip eder:
 
 - Program açıldıktan ~1 saniye sonra bir kez, sonra **her 60 saniyede** GitHub'daki en yeni release etiketi sorgulanır.
-- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.4.0 (44.1 KB)`) ve **Güncelle** butonu aktif olur.
-- Sürüm sende ise gri `Güncel: v0.4.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
+- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.5.0 (48.4 KB)`) ve **Güncelle** butonu aktif olur.
+- Sürüm sende ise gri `Güncel: v0.5.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
 - **Denetle** butonu aynı sorguyu elle, hemen yaptırır (log satırında sonucu görünür).
 - **Güncelle** exe'yi geçici klasöre indirir, boyutunu ve `MZ` başlığını doğrular, sonra kendini değiştiren kısa bir betik başlatır: program kapanır, betik dosya kilidi çözülünce yenisiyle değiştirip uygulamayı yeniden açar. Değişim olmazsa eski exe açılır ve sürüm sayfası tarayıcıda açılır.
 - İndirme sırasında sağ tıklamaya gerek yok; buton **Sayfayı aç** olur ve sürüm sayfasına gider (asset henüz hazır değilse).
@@ -87,7 +103,7 @@ Soket seviyesindeki testler harici sunucu gerektirmez — kendi process'i içind
 dist\SelfTest.exe
 ```
 
-Bu araç MBAP çerçevelemesini (transaction/unit id, big-endian adres/adet), dört fonksiyon kodunun yanıtını, `uint16/int16/float32/uint32` çözümlerini, kelime sırasını, Modbus exception'ını ve byte count tutarsızlığını doğrular. Yazma tarafında FC05/FC06/FC16 çerçevelerinin doğru baytları taşıdığını, yankı uyuşmazlığını ve her kelime sırası için kodlama ↔ çözme gidiş-dönüşünü kontrol eder. Ayrıca güncelleyicinin saf fonksiyonlarını (etiket çözümleme, 302 hedefinden etiket çıkarma, asset URL'i, sürüm karşılaştırması, boyut biçimleme) ağa çıkmadan test eder.
+Bu araç MBAP çerçevelemesini (transaction/unit id, big-endian adres/adet), dört fonksiyon kodunun yanıtını, `uint16/int16/float32/uint32` çözümlerini, kelime sırasını, Modbus exception'ını ve byte count tutarsızlığını doğrular. Yazma tarafında FC05/FC06/FC16 çerçevelerinin doğru baytları taşıdığını, yankı uyuşmazlığını ve her kelime sırası için kodlama ↔ çözme gidiş-dönüşünü kontrol eder. RTU tarafı iki parçaya ayrılır: çerçeveleme testleri CRC16'nın bilinen vektörlerle (`01 03 00 00 00 0A → C5 CD`) aynı baytları ürettiğini, `HasValidCrc`'nin bozuk çerçeveyi yakaladığını ve `8N1 / 8E2` özetini denetler; tam yığın testi ise COM port açmadan, sahte bir çift yönlü akış üzerinden RTU cihazını taklit eder — okuma/yazma gidiş-dönüşü, exception, CRC hatası, yanlış birim id, yanıtsızlıktan doğan zaman aşımı ve zaman aşımından sonra tamponun temiz kalıp bir sonraki okumanın çalıştığı burada doğrulanır. Ayrıca güncelleyicinin saf fonksiyonlarını (etiket çözümleme, 302 hedefinden etiket çıkarma, asset URL'i, sürüm karşılaştırması, boyut biçimleme) ağa çıkmadan test eder.
 
 Gerçek cihaz yokken arayüzü ve tam yığınını denemek için sahte Modbus TCP sunucusu:
 
@@ -95,44 +111,51 @@ Gerçek cihaz yokken arayüzü ve tam yığınını denemek için sahte Modbus T
 # 1. terminal
 powershell -ExecutionPolicy Bypass -File tools\FakeServer.ps1 -Port 5021
 
-# 2. terminal — konsol probe
+# 2. terminal — konsol probe (TCP)
 dist\Probe.exe --port 5021 --fc 3 --addr 0 --qty 10
+
+# RS485 / RTU tarafı — gerçek portun adı ile
+dist\Probe.exe --list-ports
+dist\Probe.exe --com COM3 --baud 9600 --parity N --stop 1 --unit 1 --fc 3 --addr 0 --qty 10
 
 # arayüz mantığı (headless, pencere açmadan)
 powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 ```
 
-`GuiTest.ps1` 48 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı, Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
+`GuiTest.ps1` 63 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı, Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
 
 ### CI
 
 `v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, `SelfTest.exe`'yi koşar ve exe'yi release asset olarak yayınlar:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-Yayınlanan exe'nin adı `ModbusScan-v0.4.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
+Yayınlanan exe'nin adı `ModbusScan-v0.5.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
 
 ## Dosyalar
 
 | Yol | Açıklama |
 | --- | --- |
-| `src/ModbusTcp.cs` | MBAP başlığı + PDU kurulumu, okuma/yazma (FC01–FC06, FC16), veri çözme ve kodlama (hex, uint, int, float, kelime sırası) |
+| `src/ModbusTcp.cs` | `ModbusClient` tabanı (PDU kurma, okuma/yazma FC01–FC06/FC16, veri çözme ve kodlama: hex, uint, int, float, kelime sırası) + TCP MBAP taşıması |
+| `src/ModbusRtu.cs` | RS485/seri taşıması: SerialPort açma, COM listesi, `birim id + PDU + CRC16` çerçeveleme, yanıt uzunluğunu byte count'tan çözme, zaman aşımı ve yarım çerçeve temizliği |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
-| `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) |
-| `src/MainForm.cs` | 500 × 600 px pencere, bağlantı ve okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), tanım yapıştırma ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, log alanı |
+| `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) — TCP/RS485 ayrımı yoktur, ortak istemciyi kullanır |
+| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), tanım yapıştırma ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
-| `tools/SelfTest.cs` | Loopback sunucu ile soket seviyesinde kendi kendine test (CI bunu koşar) |
-| `tools/Probe.cs` | Konsol okuma aracı |
+| `tools/SelfTest.cs` | Loopback soket + sahte seri akış ile çerçeve/protokol seviyesinde kendi kendine test (CI bunu koşar) |
+| `tools/Probe.cs` | Konsol okuma aracı (`--ip/--port` veya `--com/--baud/--parity/--stop`, `--list-ports`) |
 | `tools/FakeServer.ps1` | Sahte Modbus TCP sunucusu |
 | `tools/GuiTest.ps1` | Arayüz mantığını yansıtma ile test eden betik |
 
 ## Bilinen sınırlar
 
-- Sadece Modbus **TCP**; seri (RS485/USB gateway) yok.
 - Tek istek = en fazla 125 kayıt; büyük aralıklar için parçala.
+- RS485'te veri biti sabit **8**, tek istek/tek slave; broadcast yazma, otomatik hız denemesi ve çoklu slave taraması yok.
+- RS485 zaman aşımı cihazın cevap vermemesi anlamına gelir: port açık kalır, **OKU** ile farklı adresi deneyebilirsin; **Kes** portu bırakır.
+- Seri port tek sahiplidir: aynı COM portunu başka bir program (PLC yazılımı, terminal) kullanıyorsa **Bağlan** "erişim engellendi" hatası verir.
 - Tanımlar bilgisayarda, adres bazlı tutulur; cihazdan isim okunamaz ve iki farklı cihaz aynı adres için aynı tanımı paylaşır.
-- Hata durumunda bağlantı kapanır, **Bağlan** ile yeniden dene.
+- TCP'de hata durumunda bağlantı kapanır, **Bağlan** ile yeniden dene.
 - Güncelleme denetimi ağa çıkabilmek için TLS 1.2 destekleyen bir Windows sürümü ister; proxy arkasında `github.com` erişimi kapalıysa satır `Denetlenemedi` gösterir ve okuma tarafı bundan etkilenmez.

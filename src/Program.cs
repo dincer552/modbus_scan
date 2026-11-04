@@ -2,9 +2,9 @@
 using System.Reflection;
 using System.Windows.Forms;
 
-[assembly: AssemblyVersion("0.4.0")]
-[assembly: AssemblyFileVersion("0.4.0")]
-[assembly: AssemblyTitle("Modbus TCP Test")]
+[assembly: AssemblyVersion("0.5.0")]
+[assembly: AssemblyFileVersion("0.5.0")]
+[assembly: AssemblyTitle("Modbus Test")]
 [assembly: AssemblyProduct("ModbusScan")]
 
 namespace ModbusScan

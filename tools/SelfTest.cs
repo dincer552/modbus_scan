@@ -1,14 +1,16 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.IO.Ports;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using ModbusScan;
 
 /// <summary>
-/// Soket seviyesinde kendi kendine test: aynı process içinde loopback sunucusu açıp
-/// istemcinin MBAP çerçevelemesini, çözümlemesini ve hata yollarını doğrular.
-/// Harici sunucu veya ayrı iş/proces gerektirmediği için CI'da deterministiktir.
+/// Soket ve çerçeve seviyesinde kendi kendine test: aynı process içinde loopback sunucusu
+/// açıp TCP (MBAP) yolunu, sahte bir seri akış açıp RTU (CRC16) yolunu doğrular.
+/// Harici sunucu, COM port veya ayrı iş/proces gerektirmediği için CI'da deterministiktir.
 /// </summary>
 internal static class SelfTest
 {
@@ -30,6 +32,8 @@ internal static class SelfTest
     {
         UpdaterChecks();
         CodecChecks();
+        RtuFrameChecks();
+        RtuStackChecks();
 
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
@@ -149,6 +153,204 @@ internal static class SelfTest
               "got " + ModbusTcpClient.DisplayAddress(1, 5, true));
         Check("DisplayAddress PDU modu", ModbusTcpClient.DisplayAddress(3, 10, false) == 10,
               "got " + ModbusTcpClient.DisplayAddress(3, 10, false));
+    }
+
+    /// <summary>RTU cerceveleme ve CRC16 hesabi — akis/donanim gerektirmez.</summary>
+    private static void RtuFrameChecks()
+    {
+        byte[] readReq = new byte[] { 3, 0x00, 0x00, 0x00, 0x0A };
+        Check("BuildFrame FC03 = C5 CD",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(1, readReq)) == "01 03 00 00 00 0A C5 CD",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(1, readReq)));
+
+        byte[] writeReq = new byte[] { 6, 0x00, 0x01, 0x00, 0x03 };
+        Check("BuildFrame FC06 = 98 0B",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(1, writeReq)) == "01 06 00 01 00 03 98 0B",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(1, writeReq)));
+
+        byte[] resp = new byte[] { 3, 0x02, 0x00, 0x2A };
+        Check("BuildFrame birim id 0x12 = BC 58",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(0x12, resp)) == "12 03 02 00 2A BC 58",
+              ModbusRtuClient.ToHex(ModbusRtuClient.BuildFrame(0x12, resp)));
+
+        byte[] frame = ModbusRtuClient.BuildFrame(1, readReq);
+        Check("HasValidCrc dogru cerceve", ModbusRtuClient.HasValidCrc(frame), "false");
+        frame[3] ^= 0x01;
+        Check("HasValidCrc bozuk veri false", !ModbusRtuClient.HasValidCrc(frame), "true");
+        Check("HasValidCrc kisa cerceve false", !ModbusRtuClient.HasValidCrc(new byte[] { 1, 2 }), "true");
+
+        Check("Crc16 01 04 02 FF FF = 80B8",
+              ModbusRtuClient.Crc16(new byte[] { 0x01, 0x04, 0x02, 0xFF, 0xFF }, 0, 5) == 0x80B8,
+              "got 0x" + ModbusRtuClient.Crc16(new byte[] { 0x01, 0x04, 0x02, 0xFF, 0xFF }, 0, 5).ToString("X4"));
+
+        Check("Crc16 offset/count", ModbusRtuClient.Crc16(new byte[] { 0xEE, 0x01, 0x03, 0xEE }, 1, 2) ==
+              ModbusRtuClient.Crc16(new byte[] { 0x01, 0x03 }, 0, 2), "offsetlu farkli");
+
+        Check("FormatSettings 8N1",
+              ModbusRtuClient.FormatSettings("COM3", 9600, Parity.None, 8, StopBits.One) == "COM3 9600 8N1",
+              "got " + ModbusRtuClient.FormatSettings("COM3", 9600, Parity.None, 8, StopBits.One));
+        Check("FormatSettings 8E2 / 1.5",
+              ModbusRtuClient.FormatSettings("COM1", 19200, Parity.Even, 8, StopBits.Two) == "COM1 19200 8E2" &&
+              ModbusRtuClient.StopLetter(StopBits.OnePointFive) == "1.5" &&
+              ModbusRtuClient.ParityLetter(Parity.Odd) == "O",
+              "got " + ModbusRtuClient.FormatSettings("COM1", 19200, Parity.Even, 8, StopBits.Two));
+    }
+
+    /// <summary>Tam RTU yiginini sahte seri akis uzerinden kosar: okuma, yazma, exception, CRC, zaman asimi.</summary>
+    private static void RtuStackChecks()
+    {
+        FakeSerialStream io = new FakeSerialStream(RtuDevice);
+        using (ModbusRtuClient client = new ModbusRtuClient())
+        {
+            client.UnitId = 1;
+            client.Connect(io, "COM_TEST 9600 8N1");
+            Check("RTU akis modunda IsConnected true", client.IsConnected, "false");
+            Check("RTU Description", client.Description == "COM_TEST 9600 8N1", "got " + client.Description);
+
+            RegisterRead holding = client.Read(3, 100, 5, 3000);
+            Check("RTU istek cercevesi FC03 @100 x5", io.LastRequest.StartsWith("01 03 00 64 00 05"), io.LastRequest);
+            Check("RTU FC03 10 bayt", holding.Data.Length == 10, "len=" + holding.Data.Length);
+            Check("RTU FC03 uint16 0x1234", ModbusRtuClient.UInt16(holding.Data, 0) == 0x1234, "istek=" + io.LastRequest);
+            Check("RTU FC03 int16 -2", ModbusRtuClient.Int16(holding.Data, 2) == -2, "got " + ModbusRtuClient.Int16(holding.Data, 2));
+            Check("RTU FC03 float ABCD = 2.5",
+                  Math.Abs(ModbusRtuClient.Float32(holding.Data, 4, WordOrder.ABCD) - 2.5f) < 1e-6,
+                  "got " + ModbusRtuClient.Float32(holding.Data, 4, WordOrder.ABCD));
+
+            RegisterRead coils = client.Read(1, 0, 10, 3000);
+            Check("RTU FC01 2 bayt", coils.Data.Length == 2, "len=" + coils.Data.Length);
+            Check("RTU FC01 bit0 acik / bit1 kapali", (coils.Data[0] & 1) == 1 && ((coils.Data[0] >> 1) & 1) == 0,
+                  "b0=" + coils.Data[0].ToString("X2"));
+
+            RegisterRead inputs = client.Read(2, 5, 3, 3000);
+            Check("RTU FC02 bit verisi", inputs.Data.Length == 1 && inputs.Data[0] == 0x05, "len=" + inputs.Data.Length);
+
+            bool exceptionCaught = false;
+            try { client.Read(3, 9000, 1, 3000); }
+            catch (ModbusException ex) { exceptionCaught = ex.ExceptionCode == 2 && ex.FunctionCode == 3; }
+            Check("RTU exception kodu 2 yakalandi", exceptionCaught, "exception yakalanmadi");
+
+            client.WriteSingleRegister(7, 0x002A, 3000);
+            Check("RTU FC06 cercevesi", io.LastRequest.StartsWith("01 06 00 07 00 2A"), io.LastRequest);
+
+            client.WriteMultipleRegisters(200, ModbusRtuClient.EncodeFloat32(1.5f, WordOrder.CDAB), 3000);
+            Check("RTU FC16 cercevesi CDAB", io.LastRequest.StartsWith("01 10 00 C8 00 02 04 00 00 3F C0"), io.LastRequest);
+
+            client.WriteSingleCoil(30, true, 3000);
+            Check("RTU FC05 ACIK cercevesi", io.LastRequest.StartsWith("01 05 00 1E FF 00"), io.LastRequest);
+
+            bool echoMismatch = false;
+            try { client.WriteSingleRegister(8, 0x1111, 3000); }
+            catch (IOException ex) { echoMismatch = ex.Message.Contains("yankisi"); }
+            Check("RTU FC06 yanki uysuzlugu yakalandi", echoMismatch, "yanki kontrolu calismadi");
+
+            bool countMismatch = false;
+            try { client.Read(4, 0, 4, 3000); }
+            catch (IOException ex) { countMismatch = ex.Message.Contains("bayt yerine"); }
+            Check("RTU beklenen/ gelen bayt sayisi farki yakalandi", countMismatch, "uyusmazlik fark edilmedi");
+
+            io.CorruptNext = 1;
+            bool crcError = false;
+            try { client.Read(3, 100, 5, 3000); }
+            catch (IOException ex) { crcError = ex.Message.Contains("CRC"); }
+            Check("RTU CRC hatasi yakalandi", crcError, "bozuk CRC fark edilmedi");
+
+            io.CorruptNext = 2;
+            bool unitMismatch = false;
+            try { client.Read(3, 100, 5, 3000); }
+            catch (IOException ex) { unitMismatch = ex.Message.Contains("Birim id"); }
+            Check("RTU birim id uyuşmazlığı yakalandi", unitMismatch, "yanlis birim id gecmedi");
+
+            io.SilentNext = true;
+            bool timedOut = false;
+            try { client.Read(3, 100, 5, 200); }
+            catch (TimeoutException ex) { timedOut = ex.Message.Contains("gelmedi"); }
+            Check("RTU yantsizlik zaman asimi", timedOut, "zaman asimi firlamadi");
+            Check("Zaman asimi sonrasi baglanti acik kaliyor", client.IsConnected, "kapandi");
+
+            RegisterRead afterTimeout = client.Read(3, 100, 5, 3000);
+            Check("Zaman asimindan sonra okuma suruyor", afterTimeout.Data.Length == 10, "len=" + afterTimeout.Data.Length);
+
+            client.Close();
+            Check("RTU kapatma sonrasi IsConnected false", !client.IsConnected, "IsConnected hala true");
+        }
+    }
+
+    /// <summary>Sahte RTU cihazinin PDU uretici: cerceve CRC'sini dogrular, istege yanit PDU'su dondurur.</summary>
+    private static byte[] RtuDevice(byte[] frame)
+    {
+        if (frame.Length < 6 || !ModbusRtuClient.HasValidCrc(frame)) return null;  // cihaz bozuk cerceveye cevap vermez
+
+        byte unit = frame[0];
+        byte fc = frame[1];
+        int address = (frame[2] << 8) | frame[3];
+
+        if (fc == 3 && address == 9000) return ModbusRtuClient.BuildFrame(unit, new byte[] { 0x83, 0x02 });
+        if (fc == 3) return ModbusRtuClient.BuildFrame(unit, new byte[] { 3, 10, 0x12, 0x34, 0xFF, 0xFE, 0x40, 0x20, 0x00, 0x00, 0x00, 0x64 });
+        if (fc == 1) return ModbusRtuClient.BuildFrame(unit, new byte[] { 1, 2, 0x09, 0x02 });
+        if (fc == 2) return ModbusRtuClient.BuildFrame(unit, new byte[] { 2, 1, 0x05 });
+        if (fc == 4) return ModbusRtuClient.BuildFrame(unit, new byte[] { 4, 6, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03 });  // 4 kayıt istendi, 3 geldi
+        if (fc == 6 && address == 8) return ModbusRtuClient.BuildFrame(unit, new byte[] { 6, frame[2], frame[3], 0x22, 0x22 });
+        if (fc == 5 || fc == 6 || fc == 16)
+            return ModbusRtuClient.BuildFrame(unit, new byte[] { fc, frame[2], frame[3], frame[4], frame[5] });
+
+        return null;
+    }
+
+    /// <summary>COM port yerine kullanilan sahte cift yonlu akis; yazilan cerceveye aninda yanit uretir.</summary>
+    private sealed class FakeSerialStream : Stream
+    {
+        private readonly Queue<byte> _rx = new Queue<byte>();
+        private readonly List<byte> _tx = new List<byte>();
+        private readonly Func<byte[], byte[]> _device;
+
+        public string LastRequest = "";
+        public int CorruptNext;     // 1 = CRC baytini boz, 2 = birim id'yi boz
+        public bool SilentNext;     // true = cihaz hiç cevap vermesin
+
+        public FakeSerialStream(Func<byte[], byte[]> device) { _device = device; }
+
+        public override bool CanRead { get { return true; } }
+        public override bool CanWrite { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanTimeout { get { return true; } }
+        public override int ReadTimeout { get; set; }
+        public override int WriteTimeout { get; set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            for (int i = 0; i < count; i++) _tx.Add(buffer[offset + i]);
+            byte[] request = _tx.ToArray();
+            _tx.Clear();
+            LastRequest = ModbusRtuClient.ToHex(request);
+
+            byte[] reply = _device(request);
+            if (reply == null || SilentNext) { SilentNext = false; return; }
+
+            if (CorruptNext == 1) reply[reply.Length - 1] ^= 0x55;
+            else if (CorruptNext == 2) reply[0] ^= 0x0F;
+            CorruptNext = 0;
+
+            for (int i = 0; i < reply.Length; i++) _rx.Enqueue(reply[i]);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_rx.Count == 0) throw new TimeoutException("akista bayt yok");
+            int n = 0;
+            while (n < count && _rx.Count > 0)
+            {
+                buffer[offset + n] = _rx.Dequeue();
+                n++;
+            }
+            return n;
+        }
+
+        public override void Flush() { }
+
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
     }
 
     private static void UpdaterChecks()

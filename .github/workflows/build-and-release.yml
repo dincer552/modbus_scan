@@ -21,7 +21,7 @@ jobs:
         shell: cmd
         run: build.bat
 
-      - name: Kendi kendine test (MBAP cerceveleme + cozumleme + hata yollari)
+      - name: Kendi kendine test (MBAP + RTU cerceveleme, cozumleme, hata yollari)
         shell: cmd
         run: dist\SelfTest.exe
 
@@ -36,10 +36,11 @@ jobs:
           files: ModbusScan-${{ github.ref_name }}.exe
           generate_release_notes: true
           body: |
-            Modbus TCP okuma + yazma araci, 500x600 px. Kurulum gerektirmez, Windows 10/11 uzerinde dogrudan calisir.
+            Modbus TCP + RS485 (RTU) okuma/yazma araci, 500x600 px. Kurulum gerektirmez, Windows 10/11 uzerinde dogrudan calisir.
 
             **Indir:** `ModbusScan-${{ github.ref_name }}.exe`
 
+            Baglanti kutusunun basligindan TCP ya da RS485 sec: TCP'de IP/Port, RS485'te COM port, baud, parite, durdurma biti ve cihaz adresi sorulur.
             Okuma: FC01/02/03/04. Yazma: FC05/FC06/FC16 - tabloda bir hucreye cift tiklayarak.
             Kayitlara isim verebilirsin: Tanim sutununa yaz veya Excel'de kopyaladigin sutunu Ctrl+V ile yapistir.
             Ayrinti icin README.md.

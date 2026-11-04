@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.IO.Ports;
 using System.Net.Sockets;
 using System.Text;
 using System.Windows.Forms;
@@ -11,12 +12,14 @@ namespace ModbusScan
 {
     public class MainForm : Form
     {
-        private readonly ModbusTcpClient _client = new ModbusTcpClient();
+        private readonly ModbusTcpClient _tcp = new ModbusTcpClient();
+        private readonly ModbusRtuClient _rtu = new ModbusRtuClient();
 
         private GroupBox gbConnection;
         private GroupBox gbRead;
         private TextBox txtIp, txtPort, txtUnit, txtTimeout, txtAddress, txtQuantity, txtLog;
-        private ComboBox cmbFunction, cmbDecode, cmbWordOrder;
+        private ComboBox cmbMode, cmbSerialPort, cmbBaud, cmbParity, cmbStop, cmbFunction, cmbDecode, cmbWordOrder;
+        private Label lblIp, lblTcpPort, lblUnit, lblMs, lblCom, lblBaud, lblParity, lblStop;
         private CheckBox chkConvention;
         private Button btnConnect, btnDisconnect, btnRead, btnClear;
         private Label lblStatus, lblSummary;
@@ -34,12 +37,23 @@ namespace ModbusScan
         {
             BuildUi();
             LoadDefinitions();
+            ApplyMode();
             UpdateConnectionState(false);
+        }
+
+        private ModbusClient Client
+        {
+            get { return SelectedIsRtu() ? (ModbusClient)_rtu : _tcp; }
+        }
+
+        private bool SelectedIsRtu()
+        {
+            return cmbMode.SelectedIndex == 1;
         }
 
         private void BuildUi()
         {
-            Text = "Modbus TCP Test v" + typeof(Program).Assembly.GetName().Version.ToString(3);
+            Text = "Modbus Test v" + typeof(Program).Assembly.GetName().Version.ToString(3);
             ClientSize = new Size(500, 600);
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
@@ -50,18 +64,64 @@ namespace ModbusScan
             gbConnection.Text = "Bağlantı";
             gbConnection.SetBounds(8, 4, 484, 74);
 
-            gbConnection.Controls.Add(MakeLabel("IP", 10, 28));
+            // Başlık satırındaki seçim kutusu grubun içeriğini TCP / RS485 arasında değiştirir.
+            cmbMode = new ComboBox();
+            cmbMode.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbMode.SetBounds(66, 1, 64, 22);
+            cmbMode.Items.AddRange(new object[] { "TCP", "RS485" });
+            cmbMode.SelectedIndex = 0;
+            cmbMode.SelectedIndexChanged += OnModeChanged;
+            gbConnection.Controls.Add(cmbMode);
+
+            lblIp = MakeLabel("IP", 10, 28);
             txtIp = MakeTextBox("127.0.0.1", 30, 25, 92);
-            gbConnection.Controls.Add(txtIp);
-            gbConnection.Controls.Add(MakeLabel("Port", 128, 28));
+            lblTcpPort = MakeLabel("Port", 128, 28);
             txtPort = MakeTextBox("502", 158, 25, 38);
-            gbConnection.Controls.Add(txtPort);
-            gbConnection.Controls.Add(MakeLabel("ID", 202, 28));
+            lblUnit = MakeLabel("ID", 202, 28);
             txtUnit = MakeTextBox("1", 216, 25, 30);
-            gbConnection.Controls.Add(txtUnit);
-            gbConnection.Controls.Add(MakeLabel("ms", 252, 28));
+            lblMs = MakeLabel("ms", 252, 28);
             txtTimeout = MakeTextBox("2000", 268, 25, 40);
+            gbConnection.Controls.Add(lblIp);
+            gbConnection.Controls.Add(txtIp);
+            gbConnection.Controls.Add(lblTcpPort);
+            gbConnection.Controls.Add(txtPort);
+            gbConnection.Controls.Add(lblUnit);
+            gbConnection.Controls.Add(txtUnit);
+            gbConnection.Controls.Add(lblMs);
             gbConnection.Controls.Add(txtTimeout);
+
+            lblCom = MakeLabel("COM", 10, 28);
+            cmbSerialPort = new ComboBox();
+            cmbSerialPort.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbSerialPort.SetBounds(42, 25, 58, 22);
+            // Listeyi açtıkca yeniden sorgula: dönüştürücü takılıp çıkarılabiliyor.
+            cmbSerialPort.DropDown += delegate { RefreshPorts(); };
+            lblBaud = MakeLabel("Hz", 104, 28);
+            cmbBaud = new ComboBox();
+            cmbBaud.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbBaud.SetBounds(120, 25, 54, 22);
+            cmbBaud.Items.AddRange(new object[] { "1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200" });
+            cmbBaud.SelectedIndex = 3;
+            lblParity = MakeLabel("Par", 178, 28);
+            cmbParity = new ComboBox();
+            cmbParity.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbParity.SetBounds(202, 25, 50, 22);
+            cmbParity.Items.AddRange(new object[] { "Yok", "Tek", "Çift" });
+            cmbParity.SelectedIndex = 0;
+            lblStop = MakeLabel("Dur", 256, 28);
+            cmbStop = new ComboBox();
+            cmbStop.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbStop.SetBounds(280, 25, 40, 22);
+            cmbStop.Items.AddRange(new object[] { "1", "1.5", "2" });
+            cmbStop.SelectedIndex = 0;
+            gbConnection.Controls.Add(lblCom);
+            gbConnection.Controls.Add(cmbSerialPort);
+            gbConnection.Controls.Add(lblBaud);
+            gbConnection.Controls.Add(cmbBaud);
+            gbConnection.Controls.Add(lblParity);
+            gbConnection.Controls.Add(cmbParity);
+            gbConnection.Controls.Add(lblStop);
+            gbConnection.Controls.Add(cmbStop);
 
             btnConnect = new Button();
             btnConnect.Text = "Bağlan";
@@ -286,35 +346,171 @@ namespace ModbusScan
             return cmbDecode.SelectedIndex >= 3;
         }
 
-        private void OnConnect(object sender, EventArgs e)
+        /// <summary>Seçime göre bağlantı alanlarını değiştirir: TCP IP/Port, RS485 COM/hız/parite/durdurma.</summary>
+        private void ApplyMode()
         {
-            string ip = txtIp.Text.Trim();
-            int port, timeoutMs;
-            byte unit;
-            if (!int.TryParse(txtPort.Text.Trim(), out port) || port < 1 || port > 65535)
+            bool rtu = SelectedIsRtu();
+
+            lblIp.Visible = !rtu;
+            txtIp.Visible = !rtu;
+            lblTcpPort.Visible = !rtu;
+            txtPort.Visible = !rtu;
+
+            lblCom.Visible = rtu;
+            cmbSerialPort.Visible = rtu;
+            lblBaud.Visible = rtu;
+            cmbBaud.Visible = rtu;
+            lblParity.Visible = rtu;
+            cmbParity.Visible = rtu;
+            lblStop.Visible = rtu;
+            cmbStop.Visible = rtu;
+
+            if (rtu)
             {
-                Log("Geçersiz port.");
+                // Seri alanlar tek satıra sığsın diye Bağlan/Kes başlık satırına çıkar.
+                lblUnit.Location = new Point(326, 28);
+                txtUnit.SetBounds(342, 25, 30, 21);
+                lblMs.Location = new Point(378, 28);
+                txtTimeout.SetBounds(398, 25, 40, 21);
+                btnConnect.SetBounds(314, 1, 74, 21);
+                btnDisconnect.SetBounds(392, 1, 78, 21);
+                RefreshPorts();
+            }
+            else
+            {
+                lblUnit.Location = new Point(202, 28);
+                txtUnit.SetBounds(216, 25, 30, 21);
+                lblMs.Location = new Point(252, 28);
+                txtTimeout.SetBounds(268, 25, 40, 21);
+                btnConnect.SetBounds(314, 23, 74, 25);
+                btnDisconnect.SetBounds(392, 23, 80, 25);
+            }
+        }
+
+        private void OnModeChanged(object sender, EventArgs e)
+        {
+            ApplyMode();
+            UpdateConnectionState(false);
+        }
+
+        private Parity SelectedParity()
+        {
+            switch (cmbParity.SelectedIndex)
+            {
+                case 1: return Parity.Odd;
+                case 2: return Parity.Even;
+                default: return Parity.None;
+            }
+        }
+
+        private StopBits SelectedStopBits()
+        {
+            switch (cmbStop.SelectedIndex)
+            {
+                case 1: return StopBits.OnePointFive;
+                case 2: return StopBits.Two;
+                default: return StopBits.One;
+            }
+        }
+
+        /// <summary>Sistemdeki COM portlarını sayı sırasıyla listeye yeniler (COM2, COM10 gibi).</summary>
+        private void RefreshPorts()
+        {
+            string[] names = SerialPort.GetPortNames();
+            Array.Sort(names, delegate(string a, string b)
+            {
+                int na = PortNumber(a), nb = PortNumber(b);
+                if (na != nb) return na.CompareTo(nb);
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+            });
+
+            string previous = cmbSerialPort.Text;
+            cmbSerialPort.BeginUpdate();
+            cmbSerialPort.Items.Clear();
+            for (int i = 0; i < names.Length; i++) cmbSerialPort.Items.Add(names[i]);
+            cmbSerialPort.EndUpdate();
+
+            if (names.Length == 0)
+            {
+                cmbSerialPort.SelectedIndex = -1;
                 return;
             }
+            int keep = previous.Length > 0 ? Array.IndexOf(names, previous) : -1;
+            cmbSerialPort.SelectedIndex = keep >= 0 ? keep : 0;
+        }
+
+        private static int PortNumber(string name)
+        {
+            if (name == null) return 0;
+            StringBuilder digits = new StringBuilder();
+            for (int i = 0; i < name.Length; i++)
+            {
+                if (name[i] >= '0' && name[i] <= '9') digits.Append(name[i]);
+            }
+            int value;
+            return int.TryParse(digits.ToString(), out value) ? value : 0;
+        }
+
+        private void OnConnect(object sender, EventArgs e)
+        {
+            int timeoutMs;
             if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100)
             {
                 Log("Geçersiz zaman aşımı (en az 100 ms).");
                 return;
             }
+            byte unit;
             if (!byte.TryParse(txtUnit.Text.Trim(), out unit))
             {
                 Log("Geçersiz ünite id (0..255).");
                 return;
             }
 
+            bool rtu = SelectedIsRtu();
             btnConnect.Enabled = false;
             try
             {
                 DateTime t0 = DateTime.Now;
-                _client.Connect(ip, port, timeoutMs);
-                _client.UnitId = unit;
+                if (rtu)
+                {
+                    string portName = cmbSerialPort.Text.Trim();
+                    if (portName.Length == 0)
+                    {
+                        RefreshPorts();
+                        Log(cmbSerialPort.Items.Count == 0
+                            ? "COM port bulunamadı — RS485 dönüştürücünü tak, sonra listeyi yenile."
+                            : "COM port seçilmedi.");
+                        UpdateConnectionState(false);
+                        return;
+                    }
+
+                    int baud;
+                    if (!int.TryParse(cmbBaud.Text.Trim(), out baud) || baud < 300)
+                    {
+                        Log("Geçersiz baud hızı.");
+                        UpdateConnectionState(false);
+                        return;
+                    }
+
+                    _rtu.UnitId = unit;
+                    _rtu.Connect(portName, baud, SelectedParity(), 8, SelectedStopBits(), timeoutMs);
+                }
+                else
+                {
+                    string ip = txtIp.Text.Trim();
+                    int port;
+                    if (!int.TryParse(txtPort.Text.Trim(), out port) || port < 1 || port > 65535)
+                    {
+                        Log("Geçersiz port.");
+                        UpdateConnectionState(false);
+                        return;
+                    }
+                    _tcp.UnitId = unit;
+                    _tcp.Connect(ip, port, timeoutMs);
+                }
+
                 int ms = (int)(DateTime.Now - t0).TotalMilliseconds;
-                Log("Bağlandı: " + ip + ":" + port + " (unit " + unit + ") " + ms + " ms");
+                Log("Bağlandı (" + (rtu ? "RS485" : "TCP") + "): " + Client.Description + " (unit " + unit + ") " + ms + " ms");
                 UpdateConnectionState(true);
             }
             catch (Exception ex)
@@ -326,7 +522,8 @@ namespace ModbusScan
 
         private void OnDisconnect(object sender, EventArgs e)
         {
-            _client.Close();
+            _tcp.Close();
+            _rtu.Close();
             Log("Bağlantı kesildi.");
             UpdateConnectionState(false);
         }
@@ -336,11 +533,16 @@ namespace ModbusScan
             btnConnect.Enabled = !connected;
             btnDisconnect.Enabled = connected;
             btnRead.Enabled = connected;
+            cmbMode.Enabled = !connected;
             txtIp.Enabled = !connected;
             txtPort.Enabled = !connected;
             txtUnit.Enabled = !connected;
+            cmbSerialPort.Enabled = !connected;
+            cmbBaud.Enabled = !connected;
+            cmbParity.Enabled = !connected;
+            cmbStop.Enabled = !connected;
             lblStatus.Text = connected
-                ? "Durum: bağlı → " + txtIp.Text.Trim() + ":" + txtPort.Text.Trim()
+                ? "Durum: bağlı → " + Client.Description
                 : "Durum: bağlı değil";
             lblStatus.ForeColor = connected ? Color.FromArgb(0, 128, 0) : Color.Gray;
         }
@@ -365,7 +567,7 @@ namespace ModbusScan
             RegisterRead read;
             try
             {
-                read = _client.Read(fc, address, quantity, timeoutMs);
+                read = Client.Read(fc, address, quantity, timeoutMs);
             }
             catch (Exception ex)
             {
@@ -373,7 +575,10 @@ namespace ModbusScan
                 lblSummary.Text = "Hata: " + ShortMessage(ex);
                 lblSummary.ForeColor = Color.Firebrick;
                 Log("OKUMA FC" + fc.ToString("D2") + " @" + address + " x" + quantity + " → HATA: " + ex.Message);
-                if (ex is SocketException || ex is TimeoutException) UpdateConnectionState(false);
+                // RS485'te yanıt alamamak hattın kapandığı anlamına gelmez; port açık kalır.
+                bool linkLost = !Client.IsConnected || ex is SocketException ||
+                                (!SelectedIsRtu() && ex is TimeoutException);
+                if (linkLost) UpdateConnectionState(false);
                 return;
             }
 
@@ -402,7 +607,7 @@ namespace ModbusScan
         {
             if (rowIndex < 0 || _lastRead == null) return;
 
-            if (!_client.IsConnected)
+            if (!Client.IsConnected)
             {
                 lblSummary.ForeColor = Color.Firebrick;
                 lblSummary.Text = "Yazmak için önce Bağlan gerekiyor.";
@@ -416,7 +621,7 @@ namespace ModbusScan
             int timeoutMs;
             if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100) timeoutMs = 2000;
 
-            using (WriteDialog dialog = new WriteDialog(_client, read.FunctionCode, address,
+            using (WriteDialog dialog = new WriteDialog(Client, read.FunctionCode, address,
                                                         current, chkConvention.Checked, timeoutMs))
             {
                 dialog.ShowDialog(this);
@@ -825,7 +1030,8 @@ namespace ModbusScan
         {
             if (updateTimer != null) updateTimer.Stop();
             if (firstCheckTimer != null) firstCheckTimer.Stop();
-            _client.Close();
+            _tcp.Close();
+            _rtu.Close();
             base.OnFormClosing(e);
         }
 

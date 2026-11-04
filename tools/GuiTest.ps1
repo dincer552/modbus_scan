@@ -246,12 +246,14 @@ Invoke-Method $form 'ApplyDefinition' @(0, 'sicaklik set')
 $rows = @(Get-GridRows $form)
 Assert (@($rows[0] -split '\|')[3].Trim() -eq 'sicaklik set') 'tanim hucreye yazildi' $rows[0]
 
-# Excel'de tek sutun kopyalaninca sonda bos satir kalir; o yok sayilmali
+# Excel'de tek sutun kopyalaninca sonda bos satir kalir; o yok sayilmali.
+# 4. satirdaki tanım kullanıcının kendi dosyasından geliyor olabilir: yapistirilmayan satir degismemeli.
+$untouchedBefore = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })[3]
 Invoke-Method $form 'ApplyPastedDefinitions' @("motor hizasi`nsicaklik set`nalarm`r`n")
 $tanims = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })
 Assert ($tanims[0] -eq 'motor hizasi' -and $tanims[1] -eq 'sicaklik set' -and `
-        $tanims[2] -eq 'alarm' -and $tanims[3] -eq '') `
-    'excelden tek sutun yapistirildi' (($tanims[0..3] -join ' / '))
+        $tanims[2] -eq 'alarm' -and $tanims[3] -eq $untouchedBefore) `
+    'excelden tek sutun yapistirildi, 4. satir korundu' (($tanims[0..3] -join ' / '))
 
 Invoke-Method $form 'ApplyPastedDefinitions' @("baslik`t100`nalarm`t200")
 $tanims = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })
@@ -389,6 +391,80 @@ if ($maxRight -le 492 -and ($gridRect.Y - $maxStripBottom) -ge 4 -and $gridRect.
 }
 
 $ui.Close()
+
+function Invoke-Value($Form, [string]$Name) {
+    # Paramsiz private metot (SelectedParity, SelectedStopBits) cagrisinin donus degerini alir.
+    $method = $Form.GetType().GetMethod($Name, $flags)
+    if ($null -eq $method) { throw "Metot bulunamadi: $Name" }
+    return $method.Invoke($Form, @())
+}
+
+function Visible($Form, [string]$Name) { return [bool](Get-Field $Form $Name).Visible }
+
+# RS485 modu: baglanti kutusunun icerigi secime gore degisiyor, seri alanlar dogru kuruluyor.
+$serial = [Activator]::CreateInstance($type)
+# Control.Visible ust kontrolun gorunurlugune de baktigi icin pencereyi gostermeden gorunluk test edilemez.
+$serial.Show()
+
+Assert ((Visible $serial 'txtIp') -and (Visible $serial 'txtPort') -and -not (Visible $serial 'cmbSerialPort')) `
+    'RS485 varsayilani: TCP modunda IP/Port gorunur, COM gizli' 'ilk gorunum yanlis'
+
+$gb = Get-Field $serial 'gbConnection'
+(Get-Field $serial 'cmbMode').SelectedIndex = 1
+Assert ((Visible $serial 'cmbSerialPort') -and (Visible $serial 'cmbBaud') -and (Visible $serial 'cmbParity') -and
+        (Visible $serial 'cmbStop') -and -not (Visible $serial 'txtIp') -and -not (Visible $serial 'txtPort')) `
+    'RS485 secilince seri alanlar gorunur, TCP alanlar gizli' 'ALANLAR'
+
+Assert (((Get-Field $serial 'btnConnect').Top -lt 20) -and ((Get-Field $serial 'lblStatus').Top -ge 45)) `
+    'RS485: baglan butonu baslik satirinda, durum satiri korunuyor' 'YERLESIM'
+
+$overflow = @()
+foreach ($name in @('cmbSerialPort', 'cmbBaud', 'cmbParity', 'cmbStop', 'txtUnit', 'txtTimeout', 'btnConnect', 'btnDisconnect')) {
+    $c = Get-Field $serial $name
+    if ($c.Right -gt $gb.Width -or $c.Bottom -gt $gb.Height -or $c.Left -lt 0) {
+        $overflow += ('{0} sag={1} alt={2}' -f $name, $c.Right, $c.Bottom)
+    }
+}
+Assert ($overflow.Count -eq 0) 'RS485 alanlari baglanti kutusuna sigiyor' ($overflow -join ', ')
+
+Assert ((Get-Field $serial 'cmbBaud').Text -eq '9600') 'RS485 varsayilani 9600' (Get-Field $serial 'cmbBaud').Text
+Assert ((Invoke-Value $serial 'SelectedParity') -eq 'None') 'RS485 varsayilan parite Yok = None' (Invoke-Value $serial 'SelectedParity')
+Assert ((Invoke-Value $serial 'SelectedStopBits') -eq 'One') 'RS485 varsayilan durdurma 1 = One' (Invoke-Value $serial 'SelectedStopBits')
+
+(Get-Field $serial 'cmbParity').SelectedIndex = 2
+(Get-Field $serial 'cmbStop').SelectedIndex = 2
+Assert ((Invoke-Value $serial 'SelectedParity') -eq 'Even' -and (Invoke-Value $serial 'SelectedStopBits') -eq 'Two') `
+    'RS485 parite/durdurma secimi enum eslemesi' ("{0}/{1}" -f (Invoke-Value $serial 'SelectedParity'), (Invoke-Value $serial 'SelectedStopBits'))
+
+Invoke-Method $serial 'RefreshPorts' @()
+$realPorts = @([System.IO.Ports.SerialPort]::GetPortNames()).Count
+Assert ((Get-Field $serial 'cmbSerialPort').Items.Count -eq $realPorts) 'COM port sorgusu sistem listesiyle ayni' `
+    ("liste={0} sistem={1}" -f (Get-Field $serial 'cmbSerialPort').Items.Count, $realPorts)
+
+$cmbPorts = Get-Field $serial 'cmbSerialPort'
+$cmbPorts.SelectedIndex = -1
+Invoke-Handler $serial 'OnConnect'
+$serLog = [string](Get-Field $serial 'txtLog').Text
+Assert ($serLog -match 'COM port' -and -not [bool](Get-Field $serial 'btnRead').Enabled `
+        -and [bool](Get-Field $serial 'btnConnect').Enabled) `
+    'RS485: port secsiz baglanma reddediliyor, okuma pasif, tekrar denenebilir' $serLog
+
+Assert (Visible $serial 'txtAddress') 'RS485 modunda okuma alanlari duruyor' 'okuma alani kayboldu'
+
+(Get-Field $serial 'cmbMode').SelectedIndex = 0
+Assert ((Visible $serial 'txtIp') -and ((Get-Field $serial 'btnConnect').Top -eq 23)) `
+    'TCP modune donus: IP/Port gorunur, buton eski satirinda' 'geri donus bozuk'
+
+(Get-Field $serial 'txtIp').Text = '127.0.0.1'
+(Get-Field $serial 'txtPort').Text = "$Port"
+Invoke-Handler $serial 'OnConnect'
+$serStatus = [string](Get-Field $serial 'lblStatus').Text
+Assert ($serStatus -match [regex]::Escape("127.0.0.1:$Port")) 'TCP modune donus test sunucusuna baglaniyor' $serStatus
+Assert (-not [bool](Get-Field $serial 'cmbMode').Enabled) 'bagliyken TCP/RS485 secimi kilitli' 'secim acik kaldi'
+Invoke-Handler $serial 'OnDisconnect'
+Assert ([bool](Get-Field $serial 'cmbMode').Enabled -and [bool](Get-Field $serial 'btnConnect').Enabled `
+        -and -not [bool](Get-Field $serial 'btnRead').Enabled) 'kestikten sonra mod secimi ve baglan acik' 'durumlar yanlis'
+$serial.Close()
 
 if (-not $SkipOfflineCheck) {
     $offline = [Activator]::CreateInstance($type)

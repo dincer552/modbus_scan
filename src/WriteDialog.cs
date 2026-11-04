@@ -12,7 +12,7 @@ namespace ModbusScan
     /// </summary>
     public class WriteDialog : Form
     {
-        private readonly ModbusTcpClient _client;
+        private readonly ModbusClient _client;
         private readonly byte _functionCode;
         private readonly int _address;
         private readonly byte[] _current;
@@ -43,7 +43,7 @@ namespace ModbusScan
         /// <summary>Son başarılı yazmanın fonksiyon kodu (5, 6 veya 16).</summary>
         public byte WrittenFunctionCode { get; set; }
 
-        public WriteDialog(ModbusTcpClient client, byte functionCode, int address,
+        public WriteDialog(ModbusClient client, byte functionCode, int address,
                            byte[] current, bool convention, int timeoutMs)
         {
             _client = client;
