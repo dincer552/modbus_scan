@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Net.Sockets;
+using System.Text;
 using System.Windows.Forms;
 
 namespace ModbusScan
@@ -25,10 +28,12 @@ namespace ModbusScan
         private bool _updateCheckRunning;
         private bool _updateInstallRunning;
         private DataGridView grid;
+        private readonly Dictionary<string, string> _definitions = new Dictionary<string, string>();
 
         public MainForm()
         {
             BuildUi();
+            LoadDefinitions();
             UpdateConnectionState(false);
         }
 
@@ -169,12 +174,11 @@ namespace ModbusScan
             btnUpdate.Enabled = false;
             btnUpdate.Click += OnInstallUpdate;
 
-            grid = new DataGridView();
+            grid = new DefinitionGrid();
             grid.SetBounds(8, 226, 484, 246);
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
-            grid.ReadOnly = true;
             grid.RowHeadersVisible = false;
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
@@ -183,13 +187,18 @@ namespace ModbusScan
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.Fixed3D;
             grid.Font = new Font("Consolas", 9f);
-            grid.Columns.Add(NewColumn("colIndex", "#", 30, DataGridViewAutoSizeColumnMode.None));
-            grid.Columns.Add(NewColumn("colAddress", "Adres", 60, DataGridViewAutoSizeColumnMode.None));
-            grid.Columns.Add(NewColumn("colHex", "Hex", 56, DataGridViewAutoSizeColumnMode.None));
-            grid.Columns.Add(NewColumn("colDec", "uint", 50, DataGridViewAutoSizeColumnMode.None));
-            grid.Columns.Add(NewColumn("colSigned", "int", 50, DataGridViewAutoSizeColumnMode.None));
-            grid.Columns.Add(NewColumn("colValue", "Değer", 130, DataGridViewAutoSizeColumnMode.Fill));
+            grid.Columns.Add(NewColumn("colIndex", "#", 28, DataGridViewAutoSizeColumnMode.None, true));
+            grid.Columns.Add(NewColumn("colAddress", "Adres", 62, DataGridViewAutoSizeColumnMode.None, true));
+            grid.Columns.Add(NewColumn("colValue", "Değer", 110, DataGridViewAutoSizeColumnMode.None, true));
+
+            DataGridViewTextBoxColumn colDef = NewColumn("colDef", "Tanım", 260, DataGridViewAutoSizeColumnMode.Fill, false);
+            colDef.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            colDef.ToolTipText = "Kullanıcı notu. Hücreyi seç, yaz veya Excel'de kopyaladığın tek sütunu Ctrl+V ile buraya yapıştır.";
+            grid.Columns.Add(colDef);
+
             grid.CellContentDoubleClick += OnGridCellDoubleClick;
+            grid.CellEndEdit += OnDefinitionCellEndEdit;
+            ((DefinitionGrid)grid).PasteDefinitionsHandler = PasteDefinitions;
 
             txtLog = new TextBox();
             txtLog.SetBounds(8, 478, 484, 114);
@@ -228,7 +237,8 @@ namespace ModbusScan
             return tb;
         }
 
-        private static DataGridViewTextBoxColumn NewColumn(string name, string header, int width, DataGridViewAutoSizeColumnMode mode)
+        private static DataGridViewTextBoxColumn NewColumn(string name, string header, int width,
+                                                           DataGridViewAutoSizeColumnMode mode, bool readOnly)
         {
             DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
             col.Name = name;
@@ -236,6 +246,7 @@ namespace ModbusScan
             col.Width = width;
             col.AutoSizeMode = mode;
             col.SortMode = DataGridViewColumnSortMode.NotSortable;
+            col.ReadOnly = readOnly;
             col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             return col;
         }
@@ -374,9 +385,16 @@ namespace ModbusScan
                 " → " + read.Data.Length + " bayt, " + read.ElapsedMilliseconds + " ms");
         }
 
-        /// <summary>Hücreye çift tıklayınca o kaydın yazma penceresini açar.</summary>
+        /// <summary>Değer sütununa çift tık: yazma penceresi. Tanım sütununa çift tık: hücreyi düzenle.</summary>
         private void OnGridCellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
+            if (e.RowIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name == "colDef")
+            {
+                grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                grid.BeginEdit(true);
+                return;
+            }
             OpenWriteDialog(e.RowIndex);
         }
 
@@ -437,72 +455,188 @@ namespace ModbusScan
             grid.Rows.Clear();
 
             bool bits = read.FunctionCode == 1 || read.FunctionCode == 2;
-            grid.Columns["colHex"].Visible = !bits;
-            grid.Columns["colDec"].Visible = !bits;
-            grid.Columns["colSigned"].Visible = !bits;
-
             int decodeType = cmbDecode.SelectedIndex;
             WordOrder order = (WordOrder)cmbWordOrder.SelectedIndex;
-            int baseAddress = read.StartAddress;
 
             for (int i = 0; i < read.Quantity; i++)
             {
-                int offset = i * (bits ? 1 : 2);
-                string hex = "";
-                string dec = "";
-                string signed = "";
-                string value = "";
-
-                if (bits)
-                {
-                    if (offset / 8 < read.Data.Length)
-                    {
-                        int bit = (read.Data[offset / 8] >> (offset % 8)) & 1;
-                        value = bit.ToString();
-                    }
-                }
-                else if (offset + 1 < read.Data.Length)
-                {
-                    hex = read.Data[offset].ToString("X2") + " " + read.Data[offset + 1].ToString("X2");
-                    dec = ModbusTcpClient.UInt16(read.Data, offset).ToString();
-                    signed = ModbusTcpClient.Int16(read.Data, offset).ToString();
-
-                    bool wide = decodeType >= 3 && offset % 4 == 0 && offset + 3 < read.Data.Length;
-                    if (decodeType >= 3 && !wide)
-                    {
-                        value = "";
-                    }
-                    else if (wide)
-                    {
-                        switch (decodeType)
-                        {
-                            case 3: value = ModbusTcpClient.FormatFloat(ModbusTcpClient.Float32(read.Data, offset, order)); break;
-                            case 4: value = ModbusTcpClient.UInt32(read.Data, offset, order).ToString(); break;
-                            default: value = ModbusTcpClient.Int32(read.Data, offset, order).ToString(); break;
-                        }
-                    }
-                    else
-                    {
-                        switch (decodeType)
-                        {
-                            case 0: value = dec; break;
-                            case 1: value = signed; break;
-                            case 2: value = "0x" + read.Data[offset].ToString("X2") + read.Data[offset + 1].ToString("X2"); break;
-                            default: value = dec; break;
-                        }
-                    }
-                }
-
-                int displayAddress = ModbusTcpClient.DisplayAddress(read.FunctionCode, baseAddress + i, chkConvention.Checked);
-
+                int pduAddress = read.StartAddress + i;
                 grid.Rows.Add(new object[] {
-                    i.ToString(), displayAddress.ToString(), hex, dec, signed, value
+                    i.ToString(),
+                    ModbusTcpClient.DisplayAddress(read.FunctionCode, pduAddress, chkConvention.Checked).ToString(),
+                    ValueOf(read, i, bits, decodeType, order),
+                    DefinitionOf(read.FunctionCode, pduAddress)
                 });
             }
 
             grid.ResumeLayout();
             lblSummary.Text = read.Quantity + " kayıt, " + read.Data.Length + " bayt, " +
-                              read.ElapsedMilliseconds + " ms · hücreye çift tık: yaz";
+                              read.ElapsedMilliseconds + " ms · çift tık: yaz · Tanım'a Ctrl+V";
+        }
+
+        /// <summary>Satırın Değer sütununda görünecek metni, seçili çözümlemeye göre üretir.</summary>
+        private static string ValueOf(RegisterRead read, int index, bool bits, int decodeType, WordOrder order)
+        {
+            int offset = index * (bits ? 1 : 2);
+
+            if (bits)
+            {
+                if (offset / 8 >= read.Data.Length) return "";
+                return (((read.Data[offset / 8] >> (offset % 8)) & 1)).ToString();
+            }
+            if (offset + 1 >= read.Data.Length) return "";
+
+            if (decodeType == 0) return ModbusTcpClient.UInt16(read.Data, offset).ToString();
+            if (decodeType == 1) return ModbusTcpClient.Int16(read.Data, offset).ToString();
+            if (decodeType == 2)
+            {
+                return "0x" + read.Data[offset].ToString("X2") + read.Data[offset + 1].ToString("X2");
+            }
+
+            bool wide = offset % 4 == 0 && offset + 3 < read.Data.Length;
+            if (!wide) return "";
+            switch (decodeType)
+            {
+                case 3: return ModbusTcpClient.FormatFloat(ModbusTcpClient.Float32(read.Data, offset, order));
+                case 4: return ModbusTcpClient.UInt32(read.Data, offset, order).ToString();
+                default: return ModbusTcpClient.Int32(read.Data, offset, order).ToString();
+            }
+        }
+
+        private static string DefinitionKey(byte functionCode, int pduAddress)
+        {
+            return functionCode.ToString() + ":" + pduAddress.ToString();
+        }
+
+        private string DefinitionOf(byte functionCode, int pduAddress)
+        {
+            string text;
+            return _definitions.TryGetValue(DefinitionKey(functionCode, pduAddress), out text) ? text : "";
+        }
+
+        private void StoreDefinition(byte functionCode, int pduAddress, string text)
+        {
+            string key = DefinitionKey(functionCode, pduAddress);
+            text = CleanDefinitionText(text);
+            if (text.Length == 0) _definitions.Remove(key);
+            else _definitions[key] = text;
+        }
+
+        private void ApplyDefinition(int rowIndex, string text)
+        {
+            RegisterRead read = _lastRead;
+            if (read == null || rowIndex < 0 || rowIndex >= grid.Rows.Count) return;
+            int pduAddress = read.StartAddress + rowIndex;
+            StoreDefinition(read.FunctionCode, pduAddress, text);
+            grid.Rows[rowIndex].Cells["colDef"].Value = DefinitionOf(read.FunctionCode, pduAddress);
+        }
+
+        private void OnDefinitionCellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            RegisterRead read = _lastRead;
+            if (read == null || e.RowIndex < 0 || e.RowIndex >= read.Quantity) return;
+            ApplyDefinition(e.RowIndex, Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value));
+            SaveDefinitions();
+        }
+
+        /// <summary>Ctrl+V: pano metnini okur ve Tanım sütununa dağıtır.</summary>
+        private void PasteDefinitions()
+        {
+            string clipboard;
+            try { clipboard = Clipboard.GetText(); }
+            catch (Exception ex) { Log("Pano okunamadı: " + ex.Message); return; }
+            ApplyPastedDefinitions(clipboard);
+        }
+
+        /// <summary>Excel'de kopyalanan sütunu satır satır, seçili satırdan itibaren Tanım'a yazar.</summary>
+        private void ApplyPastedDefinitions(string text)
+        {
+            RegisterRead read = _lastRead;
+            if (read == null || grid.Rows.Count == 0)
+            {
+                lblSummary.Text = "Tanım yapıştırmak için önce OKU gerekiyor.";
+                return;
+            }
+            if (string.IsNullOrEmpty(text)) { Log("Panoda metin yok."); return; }
+
+            string[] lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            int count = lines.Length;
+            while (count > 0 && lines[count - 1].Trim().Length == 0) count--;  // Excel sonda boş satır bırakır
+            if (count == 0) { Log("Panoda satır yok."); return; }
+
+            int startRow = grid.CurrentCell != null ? grid.CurrentCell.RowIndex : 0;
+            int applied = Math.Min(count, grid.Rows.Count - startRow);
+            for (int i = 0; i < applied; i++)
+            {
+                string line = lines[i];
+                int tab = line.IndexOf('\t');
+                if (tab >= 0) line = line.Substring(0, tab);                            // çok sütunlu kopyada ilk sütun
+                ApplyDefinition(startRow + i, line);
+            }
+
+            SaveDefinitions();
+            Log("Tanım yapıştırıldı: " + applied + " satır (" + (startRow + 1) + ". satırdan itibaren" +
+                (applied < count ? ", kalan " + (count - applied) + " satır sığmadı" : "") + ").");
+        }
+
+        private static string CleanDefinitionText(string text)
+        {
+            if (text == null) return "";
+            string cleaned = text.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return cleaned.Length > 120 ? cleaned.Substring(0, 120) : cleaned;
+        }
+
+        private static string DefinitionPath()
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ModbusScan");
+            return Path.Combine(dir, "definitions.txt");
+        }
+
+        private void LoadDefinitions()
+        {
+            try
+            {
+                string path = DefinitionPath();
+                if (!File.Exists(path)) return;
+                string[] lines = File.ReadAllLines(path, new UTF8Encoding(false));
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string[] parts = lines[i].Split(new char[] { '\t' }, 3);
+                    if (parts.Length < 3) continue;
+                    byte fc;
+                    int address;
+                    if (!byte.TryParse(parts[0], out fc)) continue;
+                    if (!int.TryParse(parts[1], out address)) continue;
+                    string text = CleanDefinitionText(parts[2]);
+                    if (text.Length == 0) continue;
+                    _definitions[DefinitionKey(fc, address)] = text;
+                }
+            }
+            catch (Exception)
+            {
+                // Bozuk ya da okunamayan tanım dosyası boş listeyle devam eder.
+            }
+        }
+
+        private void SaveDefinitions()
+        {
+            try
+            {
+                string path = DefinitionPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                List<string> lines = new List<string>();
+                foreach (KeyValuePair<string, string> kv in _definitions)
+                {
+                    if (kv.Value.Length == 0) continue;
+                    int sep = kv.Key.IndexOf(':');
+                    lines.Add(kv.Key.Substring(0, sep) + "\t" + kv.Key.Substring(sep + 1) + "\t" + kv.Value);
+                }
+                File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                Log("Tanımlar kaydedilemedi: " + ex.Message);
+            }
         }
 
         private RegisterRead _lastRead;
@@ -693,6 +827,26 @@ namespace ModbusScan
             if (firstCheckTimer != null) firstCheckTimer.Stop();
             _client.Close();
             base.OnFormClosing(e);
+        }
+
+        /// <summary>Ctrl+V'yi tablonun kendi yapıştırmasından önce yakalar; Excel sütunu için kullanılır.</summary>
+        private sealed class DefinitionGrid : DataGridView
+        {
+            public Action PasteDefinitionsHandler { get; set; }
+
+            protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+            {
+                if (keyData == (Keys.Control | Keys.V))
+                {
+                    Action handler = PasteDefinitionsHandler;
+                    if (handler != null)
+                    {
+                        handler();
+                        return true;
+                    }
+                }
+                return base.ProcessCmdKey(ref msg, keyData);
+            }
         }
     }
 }

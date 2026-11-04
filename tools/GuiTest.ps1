@@ -25,13 +25,20 @@ function Invoke-Handler($Form, [string]$Name) {
     $method.Invoke($Form, $arguments) | Out-Null
 }
 
+function Invoke-Method($Form, [string]$Name, $Arguments) {
+    # Parametreli private metot (ApplyDefinition, PasteDefinitions...) dogrudan cagrilir.
+    $method = $Form.GetType().GetMethod($Name, $flags)
+    if ($null -eq $method) { throw "Metot bulunamadi: $Name" }
+    $method.Invoke($Form, $Arguments) | Out-Null
+}
+
 function Get-GridRows($Form) {
     $grid = Get-Field $Form 'grid'
     $rows = @()
     foreach ($row in $grid.Rows) {
         if ($row.IsNewLine) { continue }
         $cells = @()
-        foreach ($col in @('colIndex', 'colAddress', 'colHex', 'colDec', 'colSigned', 'colValue')) {
+        foreach ($col in @('colIndex', 'colAddress', 'colValue', 'colDef')) {
             $cells += [string]$row.Cells[$col].Value
         }
         $rows += ($cells -join ' | ')
@@ -118,6 +125,11 @@ function Dialog-Write {
 }
 
 $fail = 0
+
+# Kullanicinin kendi tanim dosyasi test kirliliginden korunur; sonda geri konur.
+$defPath = Join-Path $env:APPDATA 'ModbusScan\definitions.txt'
+$defBackup = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { $null }
+
 $form = [Activator]::CreateInstance($type)
 (Get-Field $form 'txtIp').Text = '127.0.0.1'
 (Get-Field $form 'txtPort').Text = "$Port"
@@ -183,7 +195,7 @@ Assert ($d['Acildi'] -and $d['Alan'] -like '*40007*' -and $d['Alan'] -like '*PDU
     'cift tiklama dialogu acildi + adres dogru' ($d['Alan'])
 Assert ($d['Onizleme'] -like 'FC06 @6*03 09*') 'Uint16 onizleme baytlari' $d['Onizleme']
 Assert ($d['Sonuc'] -like 'OK*Geri okundu: 03 09 = 777*') 'Uint16 yazma + geri okuma' $d['Sonuc']
-Assert (@($d['SonrakiSatirlar'][0] -split '\|')[5].Trim() -eq '777') 'tablo yazma sonrasi tazelendi' $d['SonrakiSatirlar'][0]
+Assert (@($d['SonrakiSatirlar'][0] -split '\|')[2].Trim() -eq '777') 'tablo yazma sonrasi tazelendi' $d['SonrakiSatirlar'][0]
 
 $d = Dialog-Write -Form $form -Function 0 -Addr 6 -Qty 4 -Row 0 -TypeIndex 3 -Value '2.25'
 Assert ($d['Onizleme'] -like 'FC16 @6 x2*40 10 00 00*') 'Float32 FC16 onizleme' $d['Onizleme']
@@ -201,7 +213,7 @@ $d = Dialog-Write -Form $form -Function 2 -Addr 0 -Qty 12 -Row 0 -TypeIndex 0 -V
 Assert ($d['Alan'] -like 'Coil*00001*' -or $d['Alan'] -like 'Coil*1 *') 'coil dialog adresi' $d['Alan']
 Assert ($d['Onizleme'] -like 'FC05 @0*KAPALI*') 'coil FC05 onizleme' $d['Onizleme']
 Assert ($d['Sonuc'] -like 'OK*Geri okundu: KAPALI (0)*') 'coil yazma + geri okuma' $d['Sonuc']
-Assert (@($d['SonrakiSatirlar'][0] -split '\|')[5].Trim() -eq '0') 'coil sonrasi tablo 0 gosteriyor' $d['SonrakiSatirlar'][0]
+Assert (@($d['SonrakiSatirlar'][0] -split '\|')[2].Trim() -eq '0') 'coil sonrasi tablo 0 gosteriyor' $d['SonrakiSatirlar'][0]
 
 $d = Dialog-Write -Form $form -Function 0 -Addr 20 -Qty 1 -Row 0 -TypeIndex 0 -Value '5'
 Assert ($d['Sonuc'] -like 'HATA*hata kodu 02*') 'hata yaniti dialogda goruntulendi' $d['Sonuc']
@@ -215,7 +227,79 @@ Assert ($d['YazPasif'] -and $d['Ipucu'] -like '*salt okunur*') 'input register: 
 $log = [string](Get-Field $form 'txtLog').Text
 Assert ($log -like '*YAZMA FC06*' -and $log -like '*YAZMA FC16*' -and $log -like '*YAZMA FC05*') `
     'yazmalar ana loga yazildi' ($log -replace "`r?`n", ' / ')
+
+# --- Tanim sutunu: kullanicinin yazdigi metin, Excel'den yapistirma, kalici dosya ---
+
+Set-Combo $form 'cmbFunction' 0
+(Get-Field $form 'txtAddress').Text = '0'
+(Get-Field $form 'txtQuantity').Text = '10'
+Invoke-Handler $form 'OnRead'
+
+$colNames = @(((Get-Field $form 'grid').Columns | ForEach-Object { $_.Name }))
+Assert (($colNames -join ',') -eq 'colIndex,colAddress,colValue,colDef') `
+    'sutunlar sadelesti: #/Adres/Değer/Tanım' ($colNames -join ',')
+
+Assert (([string](Get-Field $form 'lblSummary').Text) -like '*Ctrl+V*') `
+    'ozet satiri yapistirmayi andiriyor' ([string](Get-Field $form 'lblSummary').Text)
+
+Invoke-Method $form 'ApplyDefinition' @(0, 'sicaklik set')
+$rows = @(Get-GridRows $form)
+Assert (@($rows[0] -split '\|')[3].Trim() -eq 'sicaklik set') 'tanim hucreye yazildi' $rows[0]
+
+# Excel'de tek sutun kopyalaninca sonda bos satir kalir; o yok sayilmali
+Invoke-Method $form 'ApplyPastedDefinitions' @("motor hizasi`nsicaklik set`nalarm`r`n")
+$tanims = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })
+Assert ($tanims[0] -eq 'motor hizasi' -and $tanims[1] -eq 'sicaklik set' -and `
+        $tanims[2] -eq 'alarm' -and $tanims[3] -eq '') `
+    'excelden tek sutun yapistirildi' (($tanims[0..3] -join ' / '))
+
+Invoke-Method $form 'ApplyPastedDefinitions' @("baslik`t100`nalarm`t200")
+$tanims = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })
+Assert ($tanims[0] -eq 'baslik' -and $tanims[1] -eq 'alarm') `
+    'cok sutunlu kopyada ilk sutun alindi' (($tanims[0..1] -join ' / '))
+
+$grid = Get-Field $form 'grid'
+$grid.CurrentCell = $grid.Rows[5].Cells['colDef']
+Invoke-Method $form 'ApplyPastedDefinitions' @("fan`nkontrol")
+$tanims = @(Get-GridRows $form | ForEach-Object { @($_ -split '\|')[3].Trim() })
+Assert ($tanims[5] -eq 'fan' -and $tanims[6] -eq 'kontrol' -and $tanims[0] -eq 'baslik') `
+    'yapistirma secili satirdan baslar' (($tanims[0] + '/' + $tanims[5] + '/' + $tanims[6]))
+
+$grid.CurrentCell = $grid.Rows[0].Cells['colDef']
+Invoke-Method $form 'ApplyPastedDefinitions' @(((1..14 | ForEach-Object { "satir $_" }) -join "`n"))
+$log = [string](Get-Field $form 'txtLog').Text
+$lastLog = (($log -split "`r?`n") | Where-Object { $_ -ne '' } | Select-Object -Last 1)
+Assert ($lastLog -like '*10 satır*' -and $lastLog -like '*sığmadı*') `
+    'tabloya sigmayan satirlar logda' $lastLog
+
+# Tanimlar yeni bir okumada kaybolmamali
+Invoke-Handler $form 'OnRead'
+$rows = @(Get-GridRows $form)
+Assert (@($rows[0] -split '\|')[3].Trim() -eq 'satir 1') 'okuma tekrarlaninca tanim korundu' $rows[0]
+
+$defFile = Join-Path $env:APPDATA 'ModbusScan\definitions.txt'
+$fileText = if (Test-Path $defFile) { [System.IO.File]::ReadAllText($defFile) } else { '' }
+Assert ($fileText -like "*3`t0`tsatir 1*") 'tanim dosyasi fc/adres/metin olarak yazildi' ($fileText -replace "`r?`n", ' / ')
+
+# Ctrl+V gercek pano yolu: pano kilitli/ersilemezse uygulama cokmemeli (son satira yazar, diger kontrolleri bozmaz)
+$grid.CurrentCell = $grid.Rows[$grid.Rows.Count - 1].Cells['colDef']
+$thrown = $false
+try { Invoke-Method $form 'PasteDefinitions' @() } catch { $thrown = $true }
+Assert (-not $thrown) 'ctrl+v pano yolu hatada cokmuyor' 'exception'
+
 $form.Close()
+
+$restored = [Activator]::CreateInstance($type)
+(Get-Field $restored 'txtIp').Text = '127.0.0.1'
+(Get-Field $restored 'txtPort').Text = "$Port"
+(Get-Field $restored 'txtUnit').Text = '1'
+(Get-Field $restored 'txtTimeout').Text = '2000'
+Invoke-Handler $restored 'OnConnect'
+Invoke-Handler $restored 'OnRead'
+$rows = @(Get-GridRows $restored)
+Assert (@($rows[0] -split '\|')[3].Trim() -eq 'satir 1') 'tanim yeni pencerede dosyadan geri yuklendi' `
+    (($rows[0] + ' / durum=' + [string](Get-Field $restored 'lblStatus').Text))
+$restored.Close()
 
 # --- Guncelleme seridi: durum makinesi yansitmaya dogrudan surulur (aga gidilmez) ---
 function New-UpdateInfo([string]$Tag, [bool]$Newer, [bool]$Asset, [long]$Size) {
@@ -322,6 +406,12 @@ if (-not $SkipOfflineCheck) {
         Write-Host "KALDI  baglanti yok senaryosu: $log / bas=$canRetry oku=$readEnabled"
     }
     $offline.Close()
+}
+
+if ($null -eq $defBackup) {
+    if (Test-Path $defPath) { Remove-Item $defPath -Force }
+} else {
+    [System.IO.File]::WriteAllText($defPath, $defBackup, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 Write-Host ('SONUC: {0} hata' -f $fail)

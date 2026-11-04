@@ -4,6 +4,7 @@ Kompakt (500 × 600 px) bir **Modbus TCP test aracı**. `mbpoll`ün okuma taraf�
 
 Okuma: FC01 (coil), FC02 (discrete input), FC03 (holding register), FC04 (input register).
 Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda bir hücreye çift tıklayarak.
+Not: her kayıt için kendi adını yazabildiğin **Tanım** sütunu; Excel'den kopyalayıp Ctrl+V ile yapıştırılabilir.
 Tarama ve kayıt sekmesi sonraki sürümlerde eklenecek.
 
 ## İndir
@@ -18,9 +19,21 @@ Ek bir şey kurmana gerek yok — Windows 10/11'de gelen .NET Framework 4.8 ile 
 1. **IP / Port / ID / ms**: cihazın veya gateway'in adresi. Port genelde `502`, zaman aşımı `2000` ms.
 2. **Bağlan** → durum satırı yeşile döner.
 3. **Fonksiyon** seç, **Adres** (PDU, 0 tabanlı) ve **Adet** (1–125) gir, **OKU**.
-4. Tablo her kayıt için ham hex, `uint16`, `int16` ve seçtiğin çözümlenmiş değeri gösterir.
+4. Tablo dört sütun gösterir: **#** (satıra yazdığın tanım), **Adres**, **Değer** (seçtiğin çözümleme) ve **Tanım** (senin notun).
+   - **Değer** sütunu, yukarıdaki **Değer** kutusundaki çözümlemeyi kullanır: `Ondalık (uint16)`, `İşaretli (int16)`, `Hex`, `Float32`, `Uint32`, `Int32`. Ham hex görmek istersen çözümlemeyi `Hex` seç.
    - **4xxxx göster** işaretliyken adresler mbpoll alışkanlığıyla `40001 / 30001 / 10001 / 00001` biçiminde yazılır; kaldırırsan düz PDU adresi görürsün.
    - **Değer** kutusundan `Float32 / Uint32 / Int32` seçince **Kelime** kutusu açılır: `ABCD` (big-endian), `CDAB` (word swap), `BADC` (byte swap), `DCBA` (little-endian).
+
+## Tanım sütunu (Excel'den yapıştır)
+
+Kayıtların adını programın kendisi değil **sen** belirlersin: **Tanım** sütunu boş gelir, istediğin metni yazarsın.
+
+![Tanım sütunu ve Excel'den yapıştırma](docs/tanim-sutunu.png)
+
+- **Yazmak:** hücreyi seç, yazmaya başla (veya F2), Enter ile bitir. Tanım sütununa çift tıklamak hücreyi düzenler; yazma penceresi **Değer** sütununa çift tıklamayla açılır.
+- **Excel'den yapıştırmak:** Excel'de tanım sütununu kopyala, programda bir satıra tıkla, **Ctrl+V**'ye bas. Satır satır metin o satırdan itibaren Tanım'a dağıtılır; Excel'in sonda bıraktığı boş satır yok sayılır, kopya tablodan uzunsaysa sığmayan kısım log'a yazılır. Birden çok sütun kopyaladıysan her satırın ilk alanı alınır.
+- **Kalıcılık:** tanımlar fonksiyon kodu + PDU adresi ile birlikte `%APPDATA%\ModbusScan\definitions.txt` dosyasına yazılır. Programı kapatıp açtığında, adresi veya adedi değiştirdiğinde notların kaybolmaz; `Temizle` yalnızca tabloyu boşaltır, dosyaya dokunmaz.
+- **Paylaşım:** dosya düz metindir, olduğu gibi yedeklenir. Her satır üç alan taşır ve alanlar tab ile ayrılır: fonksiyon kodu, PDU adresi, tanım. Örneğin `3 0 sicaklik set` FC03 · adres 0 için tanımdır.
 
 ## Hücreye çift tıkla → yaz
 
@@ -44,8 +57,8 @@ Pencerede gönderilecek baytlar **önizleme** satırında görünür — örn. `
 Pencerenin altındaki şerit programın kendi güncelliğini takip eder:
 
 - Program açıldıktan ~1 saniye sonra bir kez, sonra **her 60 saniyede** GitHub'daki en yeni release etiketi sorgulanır.
-- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.3.0 (32.3 KB)`) ve **Güncelle** butonu aktif olur.
-- Sürüm sende ise gri `Güncel: v0.3.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
+- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.4.0 (44.1 KB)`) ve **Güncelle** butonu aktif olur.
+- Sürüm sende ise gri `Güncel: v0.4.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
 - **Denetle** butonu aynı sorguyu elle, hemen yaptırır (log satırında sonucu görünür).
 - **Güncelle** exe'yi geçici klasöre indirir, boyutunu ve `MZ` başlığını doğrular, sonra kendini değiştiren kısa bir betik başlatır: program kapanır, betik dosya kilidi çözülünce yenisiyle değiştirip uygulamayı yeniden açar. Değişim olmazsa eski exe açılır ve sürüm sayfası tarayıcıda açılır.
 - İndirme sırasında sağ tıklamaya gerek yok; buton **Sayfayı aç** olur ve sürüm sayfasına gider (asset henüz hazır değilse).
@@ -89,18 +102,18 @@ dist\Probe.exe --port 5021 --fc 3 --addr 0 --qty 10
 powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 ```
 
-`GuiTest.ps1` 37 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı, Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
+`GuiTest.ps1` 48 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı, Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
 
 ### CI
 
 `v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, `SelfTest.exe`'yi koşar ve exe'yi release asset olarak yayınlar:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
-Yayınlanan exe'nin adı `ModbusScan-v0.3.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
+Yayınlanan exe'nin adı `ModbusScan-v0.4.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
 
 ## Dosyalar
 
@@ -109,7 +122,7 @@ Yayınlanan exe'nin adı `ModbusScan-v0.3.0.exe` olur; program tam bu adı `rele
 | `src/ModbusTcp.cs` | MBAP başlığı + PDU kurulumu, okuma/yazma (FC01–FC06, FC16), veri çözme ve kodlama (hex, uint, int, float, kelime sırası) |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
 | `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) |
-| `src/MainForm.cs` | 500 × 600 px pencere, bağlantı ve okuma alanları, sonuç tablosu, log alanı |
+| `src/MainForm.cs` | 500 × 600 px pencere, bağlantı ve okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), tanım yapıştırma ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
 | `tools/SelfTest.cs` | Loopback sunucu ile soket seviyesinde kendi kendine test (CI bunu koşar) |
 | `tools/Probe.cs` | Konsol okuma aracı |
@@ -120,5 +133,6 @@ Yayınlanan exe'nin adı `ModbusScan-v0.3.0.exe` olur; program tam bu adı `rele
 
 - Sadece Modbus **TCP**; seri (RS485/USB gateway) yok.
 - Tek istek = en fazla 125 kayıt; büyük aralıklar için parçala.
+- Tanımlar bilgisayarda, adres bazlı tutulur; cihazdan isim okunamaz ve iki farklı cihaz aynı adres için aynı tanımı paylaşır.
 - Hata durumunda bağlantı kapanır, **Bağlan** ile yeniden dene.
 - Güncelleme denetimi ağa çıkabilmek için TLS 1.2 destekleyen bir Windows sürümü ister; proxy arkasında `github.com` erişimi kapalıysa satır `Denetlenemedi` gösterir ve okuma tarafı bundan etkilenmez.

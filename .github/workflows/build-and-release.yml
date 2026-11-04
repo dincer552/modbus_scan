@@ -41,4 +41,5 @@ jobs:
             **Indir:** `ModbusScan-${{ github.ref_name }}.exe`
 
             Okuma: FC01/02/03/04. Yazma: FC05/FC06/FC16 - tabloda bir hucreye cift tiklayarak.
+            Kayitlara isim verebilirsin: Tanim sutununa yaz veya Excel'de kopyaladigin sutunu Ctrl+V ile yapistir.
             Ayrinti icin README.md.
