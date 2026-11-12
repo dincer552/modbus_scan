@@ -685,8 +685,9 @@ namespace ModbusScan
                 {
                     read = Client.Read(fc, address, quantity, timeoutMs);
                 }
-                catch (ModbusException ex) when (ex.ExceptionCode == 2 && (fc == 3 || fc == 4))
+                catch (ModbusException ex)
                 {
+                    if (ex.ExceptionCode != 2 || (fc != 3 && fc != 4)) throw;
                     // Bir blokta tek bir geçersiz adres olsa bile diğer register'ları tek tek tara.
                     read = ReadAroundIllegalAddresses(fc, address, quantity, timeoutMs);
                 }
@@ -742,8 +743,9 @@ namespace ModbusScan
                     result.Requests += one.Requests;
                     readable++;
                 }
-                catch (ModbusException ex) when (ex.ExceptionCode == 2)
+                catch (ModbusException ex)
                 {
+                    if (ex.ExceptionCode != 2) throw;
                     result.Errors[i] = "ILLEGAL DATA ADDRESS (02)";
                     result.Requests++;
                 }
@@ -772,6 +774,12 @@ namespace ModbusScan
             {
                 grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
                 grid.BeginEdit(true);
+                return;
+            }
+            if (_lastRead != null && _lastRead.Errors != null && _lastRead.Errors.ContainsKey(e.RowIndex))
+            {
+                lblSummary.ForeColor = Color.Firebrick;
+                lblSummary.Text = "Bu adres okunamadığı için yazma penceresi açılamaz.";
                 return;
             }
             OpenWriteDialog(e.RowIndex);
@@ -845,7 +853,9 @@ namespace ModbusScan
                 grid.Rows.Add(new object[] {
                     i.ToString(),
                     ModbusTcpClient.DisplayAddress(read.FunctionCode, pduAddress, chkConvention.Checked).ToString(),
-                    invalid ? error : ValueOf(read, i, bits, decodeType, order),
+                    invalid ? error : ((decodeType >= 3 && read.Errors != null &&
+                        (read.Errors.ContainsKey(i - 1) || read.Errors.ContainsKey(i + 1))) ? "—" :
+                        ValueOf(read, i, bits, decodeType, order)),
                     DefinitionOf(read.FunctionCode, pduAddress)
                 });
                 if (invalid)
