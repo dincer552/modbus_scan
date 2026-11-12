@@ -48,6 +48,8 @@ namespace ModbusScan
         public int ElapsedMilliseconds;
         public int BytesPerItem;
         public int Requests;
+        // Sparse scan: index -> Modbus exception explanation (currently used for Exception 02).
+        public Dictionary<int, string> Errors;
     }
 
     /// <summary>

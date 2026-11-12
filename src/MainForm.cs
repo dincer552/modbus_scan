@@ -25,6 +25,7 @@ namespace ModbusScan
         private Label lblStatus, lblSummary;
         private Label lblUpdate;
         private Button btnCheckUpdate, btnUpdate;
+        private Button btnClearDefinitions;
         private Timer updateTimer;
         private Timer firstCheckTimer;
         private UpdateInfo _updateInfo;
@@ -241,8 +242,13 @@ namespace ModbusScan
             lblWords.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             cmbWordOrder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
+            btnClearDefinitions = new Button();
+            btnClearDefinitions.Text = "Tanımları Temizle";
+            btnClearDefinitions.SetBounds(8, 196, 126, 25);
+            btnClearDefinitions.Click += OnClearDefinitions;
+
             lblUpdate = new Label();
-            lblUpdate.SetBounds(8, 201, 296, 16);
+            lblUpdate.SetBounds(140, 201, 164, 16);
             lblUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             lblUpdate.Text = "Güncelleme: henüz denetlenmedi";
             lblUpdate.ForeColor = Color.Gray;
@@ -298,6 +304,7 @@ namespace ModbusScan
 
             Controls.Add(gbConnection);
             Controls.Add(gbRead);
+            Controls.Add(btnClearDefinitions);
             Controls.Add(lblUpdate);
             Controls.Add(btnCheckUpdate);
             Controls.Add(btnUpdate);
@@ -674,7 +681,16 @@ namespace ModbusScan
             Client.Progress = ReportReadProgress;
             try
             {
-                read = Client.Read(fc, address, quantity, timeoutMs);
+                try
+                {
+                    read = Client.Read(fc, address, quantity, timeoutMs);
+                }
+                catch (ModbusException ex)
+                {
+                    if (ex.ExceptionCode != 2 || (fc != 3 && fc != 4)) throw;
+                    // Bir blokta tek bir geçersiz adres olsa bile diğer register'ları tek tek tara.
+                    read = ReadAroundIllegalAddresses(fc, address, quantity, timeoutMs);
+                }
             }
             catch (Exception ex)
             {
@@ -699,6 +715,49 @@ namespace ModbusScan
                 " → " + read.Data.Length + " bayt, " + read.Requests + " istek, " + read.ElapsedMilliseconds + " ms");
         }
 
+        /// <summary>
+        /// İlk blok isteği Illegal Data Address döndürdüğünde aralığı register register tarar.
+        /// Yalnızca Exception 02 atlanır; diğer iletişim/protokol hataları normal hata akışına gider.
+        /// </summary>
+        private RegisterRead ReadAroundIllegalAddresses(byte functionCode, int startAddress, int quantity, int timeoutMs)
+        {
+            RegisterRead result = new RegisterRead();
+            result.FunctionCode = functionCode;
+            result.StartAddress = startAddress;
+            result.Quantity = quantity;
+            result.BytesPerItem = 2;
+            result.Data = new byte[quantity * 2];
+            result.Errors = new Dictionary<int, string>();
+
+            int readable = 0;
+            for (int i = 0; i < quantity; i++)
+            {
+                try
+                {
+                    RegisterRead one = Client.Read(functionCode, startAddress + i, 1, timeoutMs);
+                    if (one.Data == null || one.Data.Length != 2)
+                        throw new IOException("Tek register okumasında 2 bayt yerine " +
+                                              (one.Data == null ? 0 : one.Data.Length) + " bayt geldi.");
+                    result.Data[i * 2] = one.Data[0];
+                    result.Data[i * 2 + 1] = one.Data[1];
+                    result.Requests += one.Requests;
+                    readable++;
+                }
+                catch (ModbusException ex)
+                {
+                    if (ex.ExceptionCode != 2) throw;
+                    result.Errors[i] = "ILLEGAL DATA ADDRESS (02)";
+                    result.Requests++;
+                }
+
+                if (Client.Progress != null) Client.Progress(i + 1, quantity);
+            }
+
+            Log("Aralık taraması: " + readable + "/" + quantity +
+                " register okunabildi, " + result.Errors.Count + " geçersiz adres.");
+            return result;
+        }
+
         /// <summary>Parçalı okuma ilerlemesini durum satırında gösterir; büyük okumalarda pencere donmuş görünmesin.</summary>
         private void ReportReadProgress(int done, int total)
         {
@@ -715,6 +774,12 @@ namespace ModbusScan
             {
                 grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
                 grid.BeginEdit(true);
+                return;
+            }
+            if (_lastRead != null && _lastRead.Errors != null && _lastRead.Errors.ContainsKey(e.RowIndex))
+            {
+                lblSummary.ForeColor = Color.Firebrick;
+                lblSummary.Text = "Bu adres okunamadığı için yazma penceresi açılamaz.";
                 return;
             }
             OpenWriteDialog(e.RowIndex);
@@ -783,18 +848,29 @@ namespace ModbusScan
             for (int i = 0; i < read.Quantity; i++)
             {
                 int pduAddress = read.StartAddress + i;
+                string error;
+                bool invalid = read.Errors != null && read.Errors.TryGetValue(i, out error);
                 grid.Rows.Add(new object[] {
                     i.ToString(),
                     ModbusTcpClient.DisplayAddress(read.FunctionCode, pduAddress, chkConvention.Checked).ToString(),
-                    ValueOf(read, i, bits, decodeType, order),
+                    invalid ? error : ((decodeType >= 3 && read.Errors != null &&
+                        (read.Errors.ContainsKey(i - 1) || read.Errors.ContainsKey(i + 1))) ? "—" :
+                        ValueOf(read, i, bits, decodeType, order)),
                     DefinitionOf(read.FunctionCode, pduAddress)
                 });
+                if (invalid)
+                {
+                    grid.Rows[grid.Rows.Count - 1].DefaultCellStyle.ForeColor = Color.Firebrick;
+                    grid.Rows[grid.Rows.Count - 1].Cells["colValue"].ToolTipText = "Bu adres cihaz tarafından desteklenmiyor (Modbus Exception 02).";
+                }
             }
 
             grid.ResumeLayout();
+            int invalidCount = read.Errors == null ? 0 : read.Errors.Count;
             lblSummary.Text = read.Quantity + " kayıt, " + read.Data.Length + " bayt, " +
-                              read.Requests + " istek, " + read.ElapsedMilliseconds +
-                              " ms · çift tık: yaz · Tanım'a Ctrl+V";
+                              read.Requests + " istek, " + read.ElapsedMilliseconds + " ms" +
+                              (invalidCount > 0 ? " · " + invalidCount + " geçersiz adres (02)" : "") +
+                              " · çift tık: yaz · Tanım'a Ctrl+V";
         }
 
         /// <summary>Satırın Değer sütununda görünecek metni, seçili çözümlemeye göre üretir.</summary>
@@ -976,6 +1052,31 @@ namespace ModbusScan
             grid.Rows.Clear();
             txtLog.Clear();
             lblSummary.Text = "—";
+        }
+
+        /// <summary>Görüntülenen aralığın Tanım hücrelerini ve kalıcı notlarını temizler.</summary>
+        private void OnClearDefinitions(object sender, EventArgs e)
+        {
+            if (_lastRead == null || grid.Rows.Count == 0)
+            {
+                Log("Temizlenecek tanım yok; önce kayıtları okuyun.");
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(
+                "Görüntülenen aralıktaki Tanım bilgileri silinsin mi?",
+                "Tanımları Temizle", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes) return;
+
+            for (int i = 0; i < _lastRead.Quantity; i++)
+            {
+                int address = _lastRead.StartAddress + i;
+                _definitions.Remove(DefinitionKey(_lastRead.FunctionCode, address));
+                grid.Rows[i].Cells["colDef"].Value = "";
+            }
+            SaveDefinitions();
+            Log("Tanımlar temizlendi: FC" + _lastRead.FunctionCode.ToString("D2") +
+                " @" + _lastRead.StartAddress + " x" + _lastRead.Quantity + ".");
         }
 
         private void Log(string message)
