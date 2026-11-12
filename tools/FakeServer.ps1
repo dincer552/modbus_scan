@@ -8,6 +8,14 @@ $ErrorActionPreference = 'Stop'
 
 $script:Holding = New-Object 'byte[]' 40
 $script:Coils = @{}
+# Hata toleransi senaryosu: okuma araligi bu kayitlara dokunursa cihaz exception 2 verir.
+$script:Illegal = 400, 401, 450
+function Test-IllegalRange([int]$Start, [int]$Count) {
+    foreach ($a in $script:Illegal) {
+        if ($a -ge $Start -and $a -lt ($Start + $Count)) { return $true }
+    }
+    return $false
+}
 function Set-Reg([int]$Index, [int]$Value) {
     $script:Holding[$Index * 2] = [byte](($Value -shr 8) -band 0xFF)
     $script:Holding[$Index * 2 + 1] = [byte]($Value -band 0xFF)
@@ -97,6 +105,7 @@ $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Lo
 $listener.Start()
 Write-Host "SAhte Modbus TCP sunucusu 127.0.0.1:$Port uzerinde dinliyor (unit $UnitId)."
 Write-Host "FC03/04 => holding, FC01/02 => bit deseni, FC05/06/16 => yazilir ve saklanir, adres >= 9000 => exception 2."
+Write-Host "Okuma araligi 400/401/450 kayitlarina dokunursa exception 2 (hata toleransi senaryosu)."
 
 try {
     while ($true) {
@@ -119,7 +128,13 @@ try {
                 Write-Host ("REQ unit={0} fc={1} addr={2} qty={3}" -f $unit, $fc, $addr, $qty)
 
                 $resp = $null
-                if ($addr -ge 9000) {
+                $silent = $false
+                if ($fc -in 1, 2, 3, 4 -and $addr -ge 60000 -and $addr -lt 60100) {
+                    # Hata toleransi senaryosu: cihaz bu kayitlara hic konusmaz, istek dusurulur.
+                    $silent = $true
+                } elseif ($addr -ge 9000) {
+                    $resp = Build-Error $fc 2
+                } elseif ($fc -in 1, 2, 3, 4 -and (Test-IllegalRange $addr $qty)) {
                     $resp = Build-Error $fc 2
                 } elseif ($fc -in 3, 4) {
                     $resp = Build-ReadResponse $fc (Get-Slice16 $addr $qty $script:Holding)
@@ -166,7 +181,7 @@ try {
                 } else {
                     $resp = Build-Error $fc 1
                 }
-                Send-Frame $stream $tid $unit $resp
+                if (-not $silent) { Send-Frame $stream $tid $unit $resp }
             }
         } catch {
             Write-Host ("Istemci hatasi: " + $_.Exception.Message)

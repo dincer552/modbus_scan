@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -34,6 +35,7 @@ namespace ModbusScan
         private readonly Dictionary<string, string> _definitions = new Dictionary<string, string>();
         private readonly Dictionary<string, string> _portLabels = new Dictionary<string, string>();
         private string _portLabelKey = "";
+        private ContextMenuStrip _definitionMenu;
 
         public MainForm()
         {
@@ -286,6 +288,13 @@ namespace ModbusScan
             grid.CellContentDoubleClick += OnGridCellDoubleClick;
             grid.CellEndEdit += OnDefinitionCellEndEdit;
             ((DefinitionGrid)grid).PasteDefinitionsHandler = PasteDefinitions;
+            ((DefinitionGrid)grid).DeleteDefinitionHandler = ClearCurrentDefinition;
+
+            _definitionMenu = new ContextMenuStrip();
+            _definitionMenu.Items.Add("Bu satırın tanımını temizle", null, OnClearDefinitionRow);
+            _definitionMenu.Items.Add("Tanım sütunundaki tüm yazıları temizle", null, OnClearAllDefinitions);
+            _definitionMenu.Opening += OnDefinitionMenuOpening;
+            grid.ContextMenuStrip = _definitionMenu;
 
             txtLog = new TextBox();
             txtLog.SetBounds(8, 478, 484, 114);
@@ -674,7 +683,8 @@ namespace ModbusScan
             Client.Progress = ReportReadProgress;
             try
             {
-                read = Client.Read(fc, address, quantity, timeoutMs);
+                // Hata toleransli: yasadisi olmayan register tabloya isaretlenir, digerleri okunmaya devam eder.
+                read = Client.ReadTolerant(fc, address, quantity, timeoutMs);
             }
             catch (Exception ex)
             {
@@ -696,7 +706,9 @@ namespace ModbusScan
             lblSummary.ForeColor = Color.DimGray;
             ShowRead(read);
             Log("OKUMA FC" + fc.ToString("D2") + " @" + address + " x" + quantity +
-                " → " + read.Data.Length + " bayt, " + read.Requests + " istek, " + read.ElapsedMilliseconds + " ms");
+                " → " + read.Data.Length + " bayt, " + read.Requests + " istek, " + read.ElapsedMilliseconds + " ms" +
+                (read.ErrorCount > 0 ? ", " + read.ErrorCount + " kayıt hatalı" : ""));
+            if (read.StopReason != null) Log("DURDU: " + read.StopReason);
         }
 
         /// <summary>Parçalı okuma ilerlemesini durum satırında gösterir; büyük okumalarda pencere donmuş görünmesin.</summary>
@@ -733,7 +745,8 @@ namespace ModbusScan
 
             RegisterRead read = _lastRead;
             int address = read.StartAddress + rowIndex;
-            byte[] current = CurrentBytesOfRow(read, rowIndex);
+            // Hatalı satırda okunmuş değer yok; yazma penceresi boş mevcut değerle açılır.
+            byte[] current = read.Failed(rowIndex) ? new byte[0] : CurrentBytesOfRow(read, rowIndex);
 
             int timeoutMs;
             if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100) timeoutMs = 2000;
@@ -783,18 +796,42 @@ namespace ModbusScan
             for (int i = 0; i < read.Quantity; i++)
             {
                 int pduAddress = read.StartAddress + i;
-                grid.Rows.Add(new object[] {
+                bool failed = read.Failed(i);
+                string value = failed ? ErrorCellText(read.ItemErrors[i])
+                                      : ValueOf(read, i, bits, decodeType, order);
+                int rowIndex = grid.Rows.Add(new object[] {
                     i.ToString(),
                     ModbusTcpClient.DisplayAddress(read.FunctionCode, pduAddress, chkConvention.Checked).ToString(),
-                    ValueOf(read, i, bits, decodeType, order),
+                    value,
                     DefinitionOf(read.FunctionCode, pduAddress)
                 });
+                if (failed)
+                {
+                    DataGridViewCell cell = grid.Rows[rowIndex].Cells["colValue"];
+                    cell.Style.ForeColor = Color.Firebrick;
+                    cell.ToolTipText = read.ItemErrors[i];
+                }
             }
 
             grid.ResumeLayout();
+            int errors = read.ErrorCount;
             lblSummary.Text = read.Quantity + " kayıt, " + read.Data.Length + " bayt, " +
-                              read.Requests + " istek, " + read.ElapsedMilliseconds +
-                              " ms · çift tık: yaz · Tanım'a Ctrl+V";
+                              read.Requests + " istek, " + read.ElapsedMilliseconds + " ms" +
+                              (errors > 0 ? " · " + errors + " kayıt hatalı" : "") +
+                              " · çift tık: yaz · Tanım'a Ctrl+V, Delete: temizle";
+            if (read.StopReason != null)
+            {
+                lblSummary.ForeColor = Color.Firebrick;
+                lblSummary.Text = read.StopReason;
+            }
+        }
+
+        /// <summary>Hata metnini Değer sütununa sığacak kısa biçime indirger; tamamı hücre ipucunda kalır.</summary>
+        private static string ErrorCellText(string error)
+        {
+            if (string.IsNullOrEmpty(error)) return "hata";
+            int sep = error.IndexOf(" · ");
+            return sep > 0 ? error.Substring(0, sep) : error;
         }
 
         /// <summary>Satırın Değer sütununda görünecek metni, seçili çözümlemeye göre üretir.</summary>
@@ -900,6 +937,91 @@ namespace ModbusScan
             SaveDefinitions();
             Log("Tanım yapıştırıldı: " + applied + " satır (" + (startRow + 1) + ". satırdan itibaren" +
                 (applied < count ? ", kalan " + (count - applied) + " satır sığmadı" : "") + ").");
+        }
+
+        /// <summary>Delete tuşu: seçili satırın tanım yazısını siler.</summary>
+        private void ClearCurrentDefinition()
+        {
+            if (grid.CurrentCell == null) return;
+            ClearDefinitionAt(grid.CurrentCell.RowIndex);
+        }
+
+        private void OnClearDefinitionRow(object sender, EventArgs e)
+        {
+            if (grid.CurrentCell == null) return;
+            ClearDefinitionAt(grid.CurrentCell.RowIndex);
+        }
+
+        private void ClearDefinitionAt(int rowIndex)
+        {
+            if (_lastRead == null || grid.Rows.Count == 0)
+            {
+                lblSummary.Text = "Tanım temizlemek için önce OKU gerekiyor.";
+                return;
+            }
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count) return;
+
+            string existing = Convert.ToString(grid.Rows[rowIndex].Cells["colDef"].Value);
+            if (existing.Length == 0) return;
+
+            ApplyDefinition(rowIndex, "");
+            SaveDefinitions();
+            Log("Tanım temizlendi (" + (rowIndex + 1) + ". satır): \"" + existing + "\"");
+        }
+
+        /// <summary>Sağ tık: tablodaki tüm tanım yazılarını siler; kalıcı dosyaya da yansır.</summary>
+        private void OnClearAllDefinitions(object sender, EventArgs e)
+        {
+            if (_lastRead == null || grid.Rows.Count == 0)
+            {
+                lblSummary.Text = "Tanım temizlemek için önce OKU gerekiyor.";
+                return;
+            }
+            int filled = FilledDefinitionRows();
+            if (filled == 0)
+            {
+                lblSummary.Text = "Tanım sütunu zaten boş.";
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(this,
+                "Tablodaki " + filled + " satırın tanım yazısı silinecek ve kalıcı tanım dosyasından da düşürülecek." +
+                Environment.NewLine + "Onaylıyor musunuz?",
+                "Tanım sütununu temizle", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) return;
+            ClearAllDefinitions();
+        }
+
+        /// <summary>Tüm tanım yazılarını siler ve kalıcı dosyaya yazar; onay diyaloğu çağırandadır.</summary>
+        private void ClearAllDefinitions()
+        {
+            int filled = FilledDefinitionRows();
+            for (int i = 0; i < grid.Rows.Count; i++) ApplyDefinition(i, "");
+            SaveDefinitions();
+            Log("Tanım sütunu temizlendi: " + filled + " satır.");
+            lblSummary.Text = "Tanım sütunu temizlendi: " + filled + " satır.";
+        }
+
+        private int FilledDefinitionRows()
+        {
+            int count = 0;
+            for (int i = 0; i < grid.Rows.Count; i++)
+            {
+                if (Convert.ToString(grid.Rows[i].Cells["colDef"].Value).Length > 0) count++;
+            }
+            return count;
+        }
+
+        /// <summary>Menü seçenekleri yalnızca silinecek yazı varsa etkin olur.</summary>
+        private void OnDefinitionMenuOpening(object sender, CancelEventArgs e)
+        {
+            bool hasRows = _lastRead != null && grid.Rows.Count > 0;
+            bool currentHasText = false;
+            if (hasRows && grid.CurrentCell != null)
+                currentHasText = Convert.ToString(grid.Rows[grid.CurrentCell.RowIndex].Cells["colDef"].Value).Length > 0;
+            _definitionMenu.Items[0].Enabled = currentHasText;
+            _definitionMenu.Items[1].Enabled = hasRows && FilledDefinitionRows() > 0;
         }
 
         private static string CleanDefinitionText(string text)
@@ -1157,6 +1279,7 @@ namespace ModbusScan
         private sealed class DefinitionGrid : DataGridView
         {
             public Action PasteDefinitionsHandler { get; set; }
+            public Action DeleteDefinitionHandler { get; set; }
 
             protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
             {
@@ -1164,6 +1287,16 @@ namespace ModbusScan
                 {
                     Action handler = PasteDefinitionsHandler;
                     if (handler != null)
+                    {
+                        handler();
+                        return true;
+                    }
+                }
+                if (keyData == Keys.Delete)
+                {
+                    Action handler = DeleteDefinitionHandler;
+                    // Hücre düzenleniyorsa Delete normal metin silme davranışı olarak kalsın.
+                    if (handler != null && !IsCurrentCellInEditMode)
                     {
                         handler();
                         return true;

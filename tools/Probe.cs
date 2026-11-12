@@ -12,6 +12,7 @@ internal static class Probe
         int port = 502, baud = 9600, address = 0, quantity = 10, timeout = 2000;
         byte fc = 3, unit = 1;
         WordOrder order = WordOrder.ABCD;
+        bool tolerant = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -36,6 +37,7 @@ internal static class Probe
                 case "--qty": quantity = int.Parse(args[++i]); break;
                 case "--timeout": timeout = int.Parse(args[++i]); break;
                 case "--order": order = (WordOrder)Enum.Parse(typeof(WordOrder), args[++i]); break;
+                case "--tolerant": tolerant = true; break;
                 default: Console.Error.WriteLine("Bilinmeyen param: " + args[i]); return 2;
             }
         }
@@ -51,7 +53,15 @@ internal static class Probe
                 else ((ModbusRtuClient)client).Connect(com, baud, ParityOf(parity), 8, StopOf(stop), timeout);
 
                 Console.WriteLine("baglanti=" + client.Description);
-                RegisterRead read = client.Read(fc, address, quantity, timeout);
+                RegisterRead read = tolerant ? client.ReadTolerant(fc, address, quantity, timeout)
+                                             : client.Read(fc, address, quantity, timeout);
+                if (tolerant)
+                {
+                    Console.WriteLine("istek=" + read.Requests + " hatali=" + read.ErrorCount +
+                                      (read.StopReason == null ? "" : " durma=" + read.StopReason));
+                    for (int i = 0; i < read.Quantity; i++)
+                        if (read.Failed(i)) Console.WriteLine("hata[" + (address + i) + "] " + read.ItemErrors[i]);
+                }
 
                 Console.WriteLine("data=" + read.Data.Length + " bytes");
                 StringBuilder hex = new StringBuilder();

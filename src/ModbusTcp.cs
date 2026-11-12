@@ -16,24 +16,25 @@ namespace ModbusScan
 
         public ModbusException(byte functionCode, byte exceptionCode)
             : base("Modbus hata yaniti: FC" + functionCode.ToString("D2") +
-                   ", hata kodu " + exceptionCode.ToString("D2") + " - " + Describe(exceptionCode))
+                   ", hata kodu " + exceptionCode.ToString("D2") + " - " + Name(exceptionCode))
         {
             FunctionCode = functionCode;
             ExceptionCode = exceptionCode;
         }
 
-        private static string Describe(byte code)
+        /// <summary>Hata kodunun kısa adı; hem mesajda hem tabloda gösterilir.</summary>
+        public static string Name(byte code)
         {
             switch (code)
             {
-                case 1: return "ILLEGAL FUNCTION";
-                case 2: return "ILLEGAL DATA ADDRESS";
-                case 3: return "ILLEGAL DATA VALUE";
-                case 4: return "SLAVE FAILURE";
-                case 6: return "SLAVE BUSY";
-                case 8: return "MEMORY PARITY ERROR";
-                case 10: return "GATEWAY PATH UNAVAILABLE";
-                case 11: return "GATEWAY TARGET NO RESPONSE";
+                case 1: return "ILEGAL FUNCTION";
+                case 2: return "ILEGAL ADRES";
+                case 3: return "ILEGAL DEGER";
+                case 4: return "SIYAR ARIZASI";
+                case 6: return "MELEZGUL MESGUL";
+                case 8: return "HAFIZA HATASI";
+                case 10: return "KAPI YOLU YOK";
+                case 11: return "KAPI HEDEF CEVAP VERMEDI";
                 default: return "BILINMEYEN";
             }
         }
@@ -48,6 +49,30 @@ namespace ModbusScan
         public int ElapsedMilliseconds;
         public int BytesPerItem;
         public int Requests;
+
+        /// <summary>Hata toleranslı okumada kayıt başına hata metni; başarılıysa null. Düz okumada hiç dolu değil.</summary>
+        public string[] ItemErrors;
+
+        /// <summary>Üst üste başarısızlık sınırına dayanca kalan kayıtlar okunmadan durma nedeni.</summary>
+        public string StopReason;
+
+        public int ErrorCount
+        {
+            get
+            {
+                if (ItemErrors == null) return 0;
+                int n = 0;
+                for (int i = 0; i < ItemErrors.Length; i++)
+                    if (!string.IsNullOrEmpty(ItemErrors[i])) n++;
+                return n;
+            }
+        }
+
+        public bool Failed(int index)
+        {
+            return ItemErrors != null && index >= 0 && index < ItemErrors.Length &&
+                   !string.IsNullOrEmpty(ItemErrors[index]);
+        }
     }
 
     /// <summary>
@@ -74,58 +99,195 @@ namespace ModbusScan
         /// <summary>Parçalı okumada her parçadan sonra (okunan, istenen) bildirir; uzun okumada arayüz donmuş görünmesin.</summary>
         public Action<int, int> Progress;
 
-        /// <summary>İstenen aralığı taşımanın tek istekte kaldıramayacağı parçalara bölerek okur.</summary>
+        /// <summary>Üst üste bu kadar kayıt okunamazsa hata toleranslı okuma bağlantı sorunu kabul edip durur.</summary>
+        public const int MaxConsecutiveFailures = 5;
+
+        /// <summary>İstenen aralığı taşımanın tek istekte kaldıramayacağı parçalara bölerek okur. Hata olursa durdurur.</summary>
         public RegisterRead Read(byte functionCode, int startAddress, int quantity, int timeoutMs)
+        {
+            ValidateRange(startAddress, quantity);
+            bool bits = IsBits(functionCode);
+
+            byte[] data = new byte[bits ? (quantity + 7) / 8 : quantity * 2];
+            int done = 0, requests = 0;
+            while (done < quantity)
+            {
+                int take = ChunkCount(quantity - done, bits);
+                byte[] chunk = ReadChunk(functionCode, startAddress + done, take, timeoutMs);
+                Place(data, chunk, done, take, bits);
+                requests++;
+                done += take;
+                if (Progress != null) Progress(done, quantity);
+            }
+
+            return BuildRead(functionCode, startAddress, quantity, data, requests, bits, null, null);
+        }
+
+        /// <summary>
+        /// Aralığı parça parça okur ama vazgeçmez: bir parça Modbus hatası ya da yanıtsızlık verirse
+        /// o parçayı kayıt kayıt dener. Hatalı kayıtlar ItemErrors içinde işaretlenir,
+        /// sağlıkları normal okumayla birebir aynı biçimde Data içine yazılır.
+        /// </summary>
+        public RegisterRead ReadTolerant(byte functionCode, int startAddress, int quantity, int timeoutMs)
+        {
+            ValidateRange(startAddress, quantity);
+            bool bits = IsBits(functionCode);
+
+            byte[] data = new byte[bits ? (quantity + 7) / 8 : quantity * 2];
+            string[] errors = new string[quantity];
+            int done = 0, requests = 0, failures = 0;
+
+            while (done < quantity)
+            {
+                int take = ChunkCount(quantity - done, bits);
+                try
+                {
+                    byte[] chunk = ReadChunk(functionCode, startAddress + done, take, timeoutMs);
+                    Place(data, chunk, done, take, bits);
+                    requests++;
+                    failures = 0;
+                    done += take;
+                    if (Progress != null) Progress(done, quantity);
+                    continue;
+                }
+                catch (Exception chunkEx)
+                {
+                    requests++;
+                    failures++;
+                    if (failures >= MaxConsecutiveFailures)
+                    {
+                        string stop = "Üst üste " + failures + " parça okunamadı (" + ShortReason(chunkEx) +
+                                      "); cihaz yanıt vermiyor olabilir.";
+                        for (int i = done; i < quantity; i++) errors[i] = "okunmadi";
+                        return BuildRead(functionCode, startAddress, quantity, data, requests, bits, errors, stop);
+                    }
+                }
+
+                // Parça bozuk: kayıtları tek tek deneyerek hatalı olanları işaretleyip devam et.
+                for (int i = 0; i < take; i++)
+                {
+                    int index = done + i;
+                    try
+                    {
+                        byte[] one = ReadChunk(functionCode, startAddress + index, 1, timeoutMs);
+                        Place(data, one, index, 1, bits);
+                        errors[index] = null;
+                        failures = 0;
+                    }
+                    catch (Exception itemEx)
+                    {
+                        errors[index] = ShortReason(itemEx);
+                        if (++failures >= MaxConsecutiveFailures)
+                        {
+                            requests++;
+                            string stop = "Üst üste " + failures + " kayıt okunamadı (" + ShortReason(itemEx) +
+                                          "); cihaz yanıt vermiyor olabilir.";
+                            for (int j = index + 1; j < quantity; j++) errors[j] = "okunmadi";
+                            return BuildRead(functionCode, startAddress, quantity, data, requests, bits, errors, stop);
+                        }
+                    }
+                    requests++;
+                    if (Progress != null) Progress(index + 1, quantity);
+                }
+                done += take;
+            }
+
+            return BuildRead(functionCode, startAddress, quantity, data, requests, bits, errors, null);
+        }
+
+        private void ValidateRange(int startAddress, int quantity)
         {
             if (!IsConnected) throw new InvalidOperationException("Baglanti yok.");
             if (quantity < 1) throw new ArgumentException("Adet 1 veya daha büyük olmalı.");
             if (startAddress < 0 || startAddress + quantity > 65536)
                 throw new ArgumentException("Adres alanı 0..65535: @" + startAddress + " ile en fazla " +
                                            (65536 - startAddress) + " kayıt okunabilir.");
+        }
 
-            bool bits = functionCode == 1 || functionCode == 2;
-            int bytesPerItem = bits ? 1 : 2;
-            int chunkLimit = bits ? MaxBitsPerRequest : MaxRegistersPerRequest;
+        private static bool IsBits(byte functionCode)
+        {
+            return functionCode == 1 || functionCode == 2;
+        }
 
-            List<byte> data = new List<byte>();
-            int done = 0, requests = 0;
-            while (done < quantity)
+        private static int ChunkCount(int remaining, bool bits)
+        {
+            int limit = bits ? MaxBitsPerRequest : MaxRegistersPerRequest;
+            return remaining > limit ? limit : remaining;
+        }
+
+        /// <summary>Tek Modbus okuma isteği; PDU kurar, byte count alanını doğrular, veri baytlarını döndürür.</summary>
+        private byte[] ReadChunk(byte functionCode, int address, int count, int timeoutMs)
+        {
+            bool bits = IsBits(functionCode);
+            byte[] request = new byte[5];
+            request[0] = functionCode;
+            request[1] = (byte)((address >> 8) & 0xFF);
+            request[2] = (byte)(address & 0xFF);
+            request[3] = (byte)((count >> 8) & 0xFF);
+            request[4] = (byte)(count & 0xFF);
+
+            byte[] response = Transact(request, timeoutMs);
+            if (response.Length == 0)
+                throw new IOException("Sunucu boş yanıt verdi (byte count alanı yok).");
+
+            int byteCount = response[0];
+            int expected = bits ? (count + 7) / 8 : count * 2;
+            if (byteCount != response.Length - 1)
+                throw new IOException("Byte count tutarsız: bildirilen " + byteCount + ", gelen " + (response.Length - 1) + ".");
+            if (byteCount != expected)
+                throw new IOException("Beklenen " + expected + " bayt yerine " + byteCount + " bayt geldi.");
+
+            byte[] data = new byte[byteCount];
+            Array.Copy(response, 1, data, 0, byteCount);
+            return data;
+        }
+
+        /// <summary>Parçayı, startAddress'a göre paketlenmiş tamponun doğru yerine yerleştirir.</summary>
+        private static void Place(byte[] buffer, byte[] chunk, int itemOffset, int itemCount, bool bits)
+        {
+            if (!bits)
             {
-                int take = quantity - done;
-                if (take > chunkLimit) take = chunkLimit;
-
-                int address = startAddress + done;
-                byte[] request = new byte[5];
-                request[0] = functionCode;
-                request[1] = (byte)((address >> 8) & 0xFF);
-                request[2] = (byte)(address & 0xFF);
-                request[3] = (byte)((take >> 8) & 0xFF);
-                request[4] = (byte)(take & 0xFF);
-
-                byte[] response = Transact(request, timeoutMs);
-                requests++;
-                if (response.Length == 0)
-                    throw new IOException("Sunucu boş yanıt verdi (byte count alanı yok).");
-
-                int byteCount = response[0];
-                int expected = bits ? (take + 7) / 8 : take * 2;
-                if (byteCount != response.Length - 1)
-                    throw new IOException("Byte count tutarsız: bildirilen " + byteCount + ", gelen " + (response.Length - 1) + ".");
-                if (byteCount != expected)
-                    throw new IOException("Beklenen " + expected + " bayt yerine " + byteCount + " bayt geldi.");
-
-                for (int i = 1; i <= byteCount; i++) data.Add(response[i]);
-                done += take;
-                if (Progress != null) Progress(done, quantity);
+                Array.Copy(chunk, 0, buffer, itemOffset * 2, itemCount * 2);
+                return;
             }
+            for (int i = 0; i < itemCount; i++)
+            {
+                bool on = ((chunk[i / 8] >> (i % 8)) & 1) != 0;
+                int target = itemOffset + i;
+                if (on) buffer[target / 8] |= (byte)(1 << (target % 8));
+                else buffer[target / 8] &= (byte)~(1 << (target % 8));
+            }
+        }
 
+        /// <summary>Tabloda tek satırda gösterilecek kadar kısa hata nedeni.</summary>
+        public static string ShortReason(Exception ex)
+        {
+            ModbusException me = ex as ModbusException;
+            if (me != null) return "ilegal hata " + me.ExceptionCode.ToString("D2") + " · " + ModbusException.Name(me.ExceptionCode);
+            if (ex is TimeoutException) return "yanıt yok";
+            if (ex is IOException) return "hatasi: " + OneLine(ex.Message);
+            return ex.GetType().Name + ": " + OneLine(ex.Message);
+        }
+
+        private static string OneLine(string message)
+        {
+            if (message == null) return "";
+            string s = message.Replace("\r", " ").Replace("\n", " ").Trim();
+            return s.Length > 40 ? s.Substring(0, 40) + "…" : s;
+        }
+
+        private RegisterRead BuildRead(byte functionCode, int startAddress, int quantity, byte[] data,
+                                       int requests, bool bits, string[] errors, string stopReason)
+        {
             RegisterRead result = new RegisterRead();
             result.FunctionCode = functionCode;
             result.StartAddress = startAddress;
             result.Quantity = quantity;
-            result.Data = data.ToArray();
-            result.BytesPerItem = bytesPerItem;
+            result.Data = data;
+            result.BytesPerItem = bits ? 1 : 2;
             result.Requests = requests;
+            result.ItemErrors = errors;
+            result.StopReason = stopReason;
             return result;
         }
 

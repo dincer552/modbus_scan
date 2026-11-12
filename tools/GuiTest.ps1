@@ -130,6 +130,18 @@ $fail = 0
 $defPath = Join-Path $env:APPDATA 'ModbusScan\definitions.txt'
 $defBackup = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { $null }
 
+# Beklenmeyen hata betigi yarida birakirsa bile kullanici tanimlari geri yuklenir.
+trap {
+    Write-Host ('HATA  betik kesildi: ' + $_.Exception.Message)
+    if ($null -eq $defBackup) {
+        if (Test-Path $defPath) { Remove-Item $defPath -Force }
+    } else {
+        [System.IO.File]::WriteAllText($defPath, $defBackup, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    Write-Host 'tanim dosyasi yedekten geri yuklendi'
+    exit 8
+}
+
 $form = [Activator]::CreateInstance($type)
 (Get-Field $form 'txtIp').Text = '127.0.0.1'
 (Get-Field $form 'txtPort').Text = "$Port"
@@ -158,7 +170,7 @@ $cases += [pscustomobject]@{ Name = 'Adet limiti yok: 300 register 3 istek'; Fun
 $cases += [pscustomobject]@{ Name = '125 register tek istek kalicyor'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '125'; Rows = 125; Cell = '1 istek' }
 $cases += [pscustomobject]@{ Name = 'Adet 0 reddediliyor'; Function = 0; Decode = 0; Word = 0; Addr = '0'; Qty = '0'; Rows = 0; Cell = 'Adet en az 1' }
 $cases += [pscustomobject]@{ Name = 'Adres alani tasma uyarisi'; Function = 0; Decode = 0; Word = 0; Addr = '65500'; Qty = '100'; Rows = 0; Cell = '65535' }
-$cases += [pscustomobject]@{ Name = 'Exception FC03/02'; Function = 0; Decode = 0; Word = 0; Addr = '9000'; Qty = '1'; Rows = 0; Cell = 'hata kodu 02' }
+$cases += [pscustomobject]@{ Name = 'Exception FC03/02 hucreye isaretlenir'; Function = 0; Decode = 0; Word = 0; Addr = '9000'; Qty = '1'; Rows = 1; Cell = 'ilegal hata 02' }
 
 foreach ($case in $cases) {
     Set-Combo $form 'cmbFunction' $case.Function
@@ -190,6 +202,60 @@ foreach ($case in $cases) {
         $rows | Select-Object -First 2 | ForEach-Object { Write-Host "        $_" }
     }
 }
+
+# --- Hata toleransi: yasadisi kayitlar isaretlenir, araligin geri kalani okunmaya devam eder ---
+
+Set-Combo $form 'cmbFunction' 0
+Set-Combo $form 'cmbDecode' 0
+(Get-Field $form 'chkConvention').Checked = $true
+(Get-Field $form 'txtAddress').Text = '350'
+(Get-Field $form 'txtQuantity').Text = '200'
+Invoke-Handler $form 'OnRead'
+
+$rows = @(Get-GridRows $form)
+$summary = [string](Get-Field $form 'lblSummary').Text
+$values = @($rows | ForEach-Object { @($_ -split '\|')[2].Trim() })
+$badCount = @($values | Where-Object { $_ -eq 'ilegal hata 02' }).Count
+$read = Get-Field $form '_lastRead'
+
+Assert ($rows.Count -eq 200) 'yasadisi kayitlar araligi bolmuyor: 200 satir doldu' ("satir=" + $rows.Count + ' ozet=' + $summary)
+Assert ($values[50] -eq 'ilegal hata 02' -and $values[51] -eq 'ilegal hata 02' -and $values[100] -eq 'ilegal hata 02') `
+    '400/401/450 deger sutununda ilegal olarak gorunuyor' (($values[50] + ' / ' + $values[51] + ' / ' + $values[100]))
+Assert ($badCount -eq 3) 'yalnizca yasadisi 3 kayit hatali' ("hatali=" + $badCount)
+Assert ($values[0] -match '^\d+$' -and $values[199] -match '^\d+$') 'hatasiz kayitlar degerleriyle dolu' (($values[0] + ' / ' + $values[199]))
+Assert ($summary -like '*3 kay* hatal*') 'ozet satiri hata adedini soyluyor' $summary
+Assert ([int]$read.ErrorCount -eq 3 -and $null -eq $read.StopReason) 'okuma durmadı, 3 hata isaretli' ("stop=" + $read.StopReason)
+$grid0 = Get-Field $form 'grid'
+Assert ($grid0.Rows[50].Cells['colValue'].Style.ForeColor.Name -eq 'Firebrick') 'hatali hucre kirmizi' `
+    $grid0.Rows[50].Cells['colValue'].Style.ForeColor.Name
+Assert ([string]$grid0.Rows[50].Cells['colValue'].ToolTipText -like '*ILEGAL ADRES*') 'hatali hucre ipucu tam nedeni tasıyor' `
+    ([string]$grid0.Rows[50].Cells['colValue'].ToolTipText)
+$logTolerant = [string](Get-Field $form 'txtLog').Text
+Assert ($logTolerant -like '*OKUMA FC03 @350 x200*3 kay* hatal*') 'okuma logu hata adedini iceriyor' `
+    (($logTolerant -split "`r?`n") | Where-Object { $_ -like '*@350*' } | Select-Object -Last 1)
+
+# Yazma penceresi hatali satirda da acilmali: okunmus deger yok, bos mevcut degerle gelir.
+$d = Dialog-Write -Form $form -Function 0 -Addr 350 -Qty 200 -Row 50 -TypeIndex 0 -Value '11'
+Assert ($d['Acildi'] -and $d['Alan'] -like '*40401*') 'hatali satirdan yazma penceresi aciliyor' ($d['Alan'])
+Assert (@($d['SonrakiSatirlar'][50] -split '\|')[2].Trim() -eq 'ilegal hata 02') 'basarisiz yazma isareti bozmuyor' $d['SonrakiSatirlar'][50]
+
+# Cihaz hic cevap vermeyen aralikta okuma birakiyor, ama baglanti ve kalan kayitlar korunuyor.
+Set-Combo $form 'cmbFunction' 0
+(Get-Field $form 'txtAddress').Text = '60000'
+(Get-Field $form 'txtQuantity').Text = '300'
+(Get-Field $form 'txtTimeout').Text = '400'
+Invoke-Handler $form 'OnRead'
+$readDead = Get-Field $form '_lastRead'
+$summaryDead = [string](Get-Field $form 'lblSummary').Text
+Assert ($null -ne $readDead.StopReason) 'cevap vermeyen aralikta okuma duruyor' $summaryDead
+Assert (@(Get-GridRows $form).Count -eq 300) 'durma sonrasi tablo yine 300 satir' ([string]@(Get-GridRows $form).Count)
+Assert ($summaryDead -like '*Üst üste*') 'ozet durma nedenini kirmizi gosteriyor' $summaryDead
+Assert ([string](Get-Field $form 'lblStatus').Text -like '*127.0.0.1*') 'durma baglantiyi kapatmiyor' ([string](Get-Field $form 'lblStatus').Text)
+(Get-Field $form 'txtTimeout').Text = '2000'
+(Get-Field $form 'txtAddress').Text = '0'
+(Get-Field $form 'txtQuantity').Text = '10'
+Invoke-Handler $form 'OnRead'
+Assert (@(Get-GridRows $form).Count -eq 10) 'durmadan sonra normal okuma suruyor' ([string](Get-Field $form 'lblSummary').Text)
 
 # --- Yazma popup'i: hucreye cift tiklama senaryolari (ayni baglanti uzerinde kalir) ---
 
@@ -544,6 +610,67 @@ Invoke-Handler $serial 'OnDisconnect'
 Assert ([bool](Get-Field $serial 'cmbMode').Enabled -and [bool](Get-Field $serial 'btnConnect').Enabled `
         -and -not [bool](Get-Field $serial 'btnRead').Enabled) 'kestikten sonra mod secimi ve baglan acik' 'durumlar yanlis'
 $serial.Close()
+
+# --- Tanim sutununu temizleme: Delete tusu, satir menuyu ve toplu temizlik ---
+$clear = [Activator]::CreateInstance($type)
+(Get-Field $clear 'txtIp').Text = '127.0.0.1'
+(Get-Field $clear 'txtPort').Text = "$Port"
+(Get-Field $clear 'txtUnit').Text = '1'
+(Get-Field $clear 'txtTimeout').Text = '2000'
+Invoke-Handler $clear 'OnConnect'
+Set-Combo $clear 'cmbFunction' 0
+(Get-Field $clear 'txtAddress').Text = '0'
+(Get-Field $clear 'txtQuantity').Text = '10'
+Invoke-Handler $clear 'OnRead'
+
+$clrGrid = Get-Field $clear 'grid'
+$menu = Get-Field $clear '_definitionMenu'
+Assert ($null -ne $menu -and [object]::ReferenceEquals($clrGrid.ContextMenuStrip, $menu)) `
+    'tablo tanim sag tik menusuna bagli' 'ContextMenuStrip atanmadi'
+Assert ($menu.Items.Count -eq 2) 'menu iki temizleme secenegi iceriyor' ([string]$menu.Items.Count)
+Assert ($null -ne $clrGrid.GetType().GetProperty('DeleteDefinitionHandler').GetValue($clrGrid)) `
+    'Delete tusu handler ile baglanmis' 'DeleteDefinitionHandler bos'
+
+function DefColumn($Form) { return @(Get-GridRows $Form | ForEach-Object { @($_ -split '\|')[3].Trim() }) }
+
+Invoke-Method $clear 'ApplyDefinition' @(0, 'silinecek bir')
+Invoke-Method $clear 'ApplyDefinition' @(1, 'silinecek iki')
+$clrGrid.CurrentCell = $clrGrid.Rows[0].Cells['colDef']
+Invoke-Method $clear 'ClearCurrentDefinition' @()
+$t = DefColumn $clear
+Assert ($t[0] -eq '' -and $t[1] -eq 'silinecek iki') 'Delete yolu yalnizca secili satiri siler' (($t[0] + '/' + $t[1]))
+Assert ([int](Invoke-Value $clear 'FilledDefinitionRows') -ge 1) 'dolu satir sayisi sayiliyor' 'sifir dondu'
+
+$clrGrid.CurrentCell = $clrGrid.Rows[1].Cells['colDef']
+Invoke-Method $clear 'OnClearDefinitionRow' @($null, [EventArgs]::Empty)
+$t = DefColumn $clear
+Assert ($t[1] -eq '') 'sag tik menu tek satiri temizliyor' $t[1]
+
+$fileText = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { '' }
+Assert ($fileText -notlike "*3`t0`t*" -and $fileText -notlike "*3`t1`t*") 'temizlenen tanim dosyadan da dusuyor' `
+    (($fileText -split "`r?`n" | Where-Object { $_ -like '3`t0*' -or $_ -like '3`t1*' }) -join ' / ')
+
+Invoke-Method $clear 'ApplyDefinition' @(2, 'toplu silinecek')
+$clrGrid.CurrentCell = $clrGrid.Rows[2].Cells['colDef']
+Invoke-Method $clear 'OnDefinitionMenuOpening' @($null, [Activator]::CreateInstance([System.ComponentModel.CancelEventArgs]))
+Assert ($menu.Items[0].Enabled -and $menu.Items[1].Enabled) 'yazi varken iki secenek de acik' `
+    ('satir=' + $menu.Items[0].Enabled + ' butun=' + $menu.Items[1].Enabled)
+
+Invoke-Method $clear 'ClearAllDefinitions' @()
+$t = DefColumn $clear
+Assert (@($t | Where-Object { $_ -ne '' }).Count -eq 0) 'toplu temizleme sutunu bosaltiyor' `
+    (($t | Where-Object { $_ -ne '' }) -join ' / ')
+Assert ([int](Invoke-Value $clear 'FilledDefinitionRows') -eq 0) 'toplu temizleme sonrasi dolu satir kalmadi' `
+    ([string](Invoke-Value $clear 'FilledDefinitionRows'))
+Assert (([string](Get-Field $clear 'lblSummary').Text) -like '*temizlendi*') 'ozet temizlemeyi bildiriyor' `
+    ([string](Get-Field $clear 'lblSummary').Text)
+$fileText = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { '' }
+Assert ($fileText -notlike "*3`t2`t*") 'toplu temizlik dosyaya da yansidi' (($fileText -replace "`r?`n", ' / '))
+
+Invoke-Method $clear 'OnDefinitionMenuOpening' @($null, [Activator]::CreateInstance([System.ComponentModel.CancelEventArgs]))
+Assert (-not $menu.Items[0].Enabled -and -not $menu.Items[1].Enabled) 'sutun bosken secenekler pasif' `
+    ('satir=' + $menu.Items[0].Enabled + ' butun=' + $menu.Items[1].Enabled)
+$clear.Close()
 
 if (-not $SkipOfflineCheck) {
     $offline = [Activator]::CreateInstance($type)

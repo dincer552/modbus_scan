@@ -325,7 +325,7 @@ internal static class SelfTest
             RegisterRead manyBits = client.Read(1, 5000, 2100, 3000);
             Check("2100 bit 2 istekte", io.RequestCount == 2 && manyBits.Requests == 2, "istek=" + io.RequestCount);
             Check("2100 bit 263 bayt", manyBits.Data.Length == 263, "len=" + manyBits.Data.Length);
-            Check("Bit parcalari bayt hizali surekli", MatchesPattern(manyBits.Data, 5000, true), FirstPatternDiff(manyBits.Data, 5000, true));
+            Check("Bit parcalari bayt hizali surekli", MatchesBitPattern(manyBits.Data, 5000, 2100), FirstBitPatternDiff(manyBits.Data, 5000, 2100));
 
             bool rejectedZero = false;
             try { client.Read(3, 0, 0, 1000); }
@@ -337,6 +337,34 @@ internal static class SelfTest
             catch (ArgumentException ex) { rejectedOverflow = ex.Message.Contains("65535"); }
             Check("Adres alani tasma siniri", rejectedOverflow, "istisna yok");
 
+            // --- hata toleransi: yasadisi register isaretlenir, digerleri okunmaya devam eder ---
+            io.RequestCount = 0;
+            RegisterRead tolerant = client.ReadTolerant(3, 6000, 20, 3000);
+            Check("Toleransli okuma 20 kaydi bitiriyor", tolerant.Quantity == 20 && tolerant.Data.Length == 40,
+                  "q=" + tolerant.Quantity + " len=" + tolerant.Data.Length);
+            Check("Yasadisi 3 register isaretlendi", tolerant.ErrorCount == 3, "hatali=" + tolerant.ErrorCount);
+            Check("6003 yasadisi hata kodu tasiyor", tolerant.Failed(3) && tolerant.ItemErrors[3].Contains("02"),
+                  "hucre=" + tolerant.ItemErrors[3]);
+            Check("6010 de yasadisi olarak isaretli", tolerant.Failed(10), "isaret yok");
+            Check("6000 saglikli kayit isaretli degil", !tolerant.Failed(0), "yanlis isaret");
+            Check("Saglikli kayitlar adres deseniyle ayni", TolerantPatternOk(tolerant, 6000, 20), "desen farki");
+            Check("Toleransli okumada durma nedeni yok", tolerant.StopReason == null, "sebep=" + tolerant.StopReason);
+            Check("Parca bozukunca tek tek deneme istekleri", tolerant.Requests > 20, "istek=" + tolerant.Requests);
+
+            RegisterRead cleanTolerant = client.ReadTolerant(3, 5000, 10, 3000);
+            RegisterRead plain = client.Read(3, 5000, 10, 3000);
+            Check("Hatasiz aralik tek istekte kalıyor", cleanTolerant.Requests == 1 && cleanTolerant.ErrorCount == 0,
+                  "istek=" + cleanTolerant.Requests + " hatali=" + cleanTolerant.ErrorCount);
+            Check("Toleransli okuma duz okuma ile ayni veri", SameData(cleanTolerant, plain), "veri farkli");
+
+            RegisterRead dead = client.ReadTolerant(3, 8000, 20, 200);
+            Check("Yanitsizlikta okuma duruyor", dead.StopReason != null && dead.StopReason.Contains("Üst üste"),
+                  "sebep=" + dead.StopReason);
+            Check("Kalan kayitlar okunmadi isaretli", dead.ErrorCount == 20 && dead.ItemErrors[19] == "okunmadi",
+                  "hatali=" + dead.ErrorCount + " son=" + dead.ItemErrors[19]);
+            Check("Yanitsizlik sonrasi baglanti acik kaliyor", client.IsConnected, "kapandi");
+            Check("Durduktan sonra okuma suruyor", client.Read(3, 5000, 4, 3000).Data.Length == 8, "sonraki okuma basarisiz");
+
             client.Close();
             Check("RTU kapatma sonrasi IsConnected false", !client.IsConnected, "IsConnected hala true");
         }
@@ -346,11 +374,50 @@ internal static class SelfTest
     /// Sahte cihaz deseninin tek kaynagi: bayt indeksini mutlak adrese baglar. Parca sinirlarinda
     /// istemci adet (kayit/bit) bazinda ilerledigi icin desen burada adres cinsinden tanimli olmali.
     /// </summary>
-    private static byte ExpectedPatternByte(int address, int i, bool bits)
-    {
+    private static byte ExpectedPatternByte(int address, int i, bool bits)    {
         if (bits) return (byte)(((address >> 3) + i) & 0xFF);
         int register = address + (i >> 1);
         return (byte)((i & 1) == 0 ? ((register >> 8) & 0xFF) : (register & 0xFF));
+    }
+
+    /// <summary>Sahte cihazın desen yanıtı: istenen adet kadar bayt, desen mutlak adresten üretilir.</summary>
+    private static byte[] PatternReply(byte unit, byte fc, int address, int quantity)
+    {
+        bool bitFc = fc == 1 || fc == 2;
+        int bytes = bitFc ? (quantity + 7) / 8 : quantity * 2;
+        byte[] pdu = new byte[bytes + 2];
+        pdu[0] = fc;
+        pdu[1] = (byte)bytes;
+        for (int i = 0; i < bytes; i++) pdu[i + 2] = ExpectedPatternByte(address, i, bitFc);
+        return ModbusRtuClient.BuildFrame(unit, pdu);
+    }
+
+    /// <summary>İstenen aralık yasadisi bir kayda degiyorsa cihaz butun istege exception ile cevap verir.</summary>
+    private static bool TouchesIllegalAddress(int start, int count)
+    {
+        for (int address = start; address < start + count; address++)
+            if (address == 6003 || address == 6004 || address == 6010) return true;
+        return false;
+    }
+
+    /// <summary>Hata toleransli okumada isaretlenmeyen kayitlarin desene uydugunu dogrular.</summary>
+    private static bool TolerantPatternOk(RegisterRead read, int startAddress, int quantity)
+    {
+        for (int i = 0; i < quantity; i++)
+        {
+            if (read.Failed(i)) continue;
+            int offset = i * 2;
+            if (read.Data[offset] != ExpectedPatternByte(startAddress, offset, false) ||
+                read.Data[offset + 1] != ExpectedPatternByte(startAddress, offset + 1, false)) return false;
+        }
+        return true;
+    }
+
+    private static bool SameData(RegisterRead a, RegisterRead b)
+    {
+        if (a.Data.Length != b.Data.Length) return false;
+        for (int i = 0; i < a.Data.Length; i++) if (a.Data[i] != b.Data[i]) return false;
+        return true;
     }
 
     /// <summary>Parcalanmis okumada verinin adres deseni boyunca kesintisiz aktigini dogrular.</summary>
@@ -374,6 +441,39 @@ internal static class SelfTest
         return "fark yok";
     }
 
+    /// <summary>
+    /// Bit okumasinda son baytin istenmeyen bitleri istemci tarafindan sifirlaniyor (desen degil,
+    /// cihaz da o bitleri rastgele doldurabiliyor), o yuzden yalnizca bitCount kadar karsilastirilir.
+    /// </summary>
+    private static byte BitTailMask(int bitCount, int index, int length)
+    {
+        int rest = bitCount % 8;
+        if (index != length - 1 || rest == 0) return (byte)0xFF;
+        return (byte)((1 << rest) - 1);
+    }
+
+    private static bool MatchesBitPattern(byte[] data, int startAddress, int bitCount)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            byte mask = BitTailMask(bitCount, i, data.Length);
+            if ((data[i] & mask) != (ExpectedPatternByte(startAddress, i, true) & mask)) return false;
+        }
+        return true;
+    }
+
+    private static string FirstBitPatternDiff(byte[] data, int startAddress, int bitCount)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            byte mask = BitTailMask(bitCount, i, data.Length);
+            if ((data[i] & mask) != (ExpectedPatternByte(startAddress, i, true) & mask))
+                return i + ": beklenen 0x" + (ExpectedPatternByte(startAddress, i, true) & mask).ToString("X2") +
+                       ", gelen 0x" + (data[i] & mask).ToString("X2");
+        }
+        return "fark yok";
+    }
+
     /// <summary>Sahte RTU cihazinin PDU uretici: cerceve CRC'sini dogrular, istege yanit PDU'su dondurur.</summary>
     private static byte[] RtuDevice(byte[] frame)
     {
@@ -384,17 +484,20 @@ internal static class SelfTest
         int address = (frame[2] << 8) | frame[3];
 
         if (fc == 3 && address == 9000) return ModbusRtuClient.BuildFrame(unit, new byte[] { 0x83, 0x02 });
+        // Hata toleransi senaryosu: 6003, 6004 ve 6010 yasadisi; araliga denk gelen istek exception 2 alir.
+        if (address >= 6000 && address < 6100 && (fc == 1 || fc == 2 || fc == 3 || fc == 4))
+        {
+            int span = (frame[4] << 8) | frame[5];
+            if (TouchesIllegalAddress(address, span)) return ModbusRtuClient.BuildFrame(unit, new byte[] { (byte)(fc | 0x80), 0x02 });
+            return PatternReply(unit, fc, address, span);
+        }
+        // Yanitsizlik senaryosu: bu araliktaki kayitlar icin cihaz hic konusmaz.
+        if (address >= 8000 && address < 8100 && (fc == 1 || fc == 2 || fc == 3 || fc == 4)) return null;
         if (address >= 5000 && (fc == 1 || fc == 2 || fc == 3 || fc == 4))
         {
             // Cok istekli okuma senaryosu: istenen adet kadar cevap, desen mutlak adresten.
             int qty = (frame[4] << 8) | frame[5];
-            bool bitFc = fc == 1 || fc == 2;
-            int bytes = bitFc ? (qty + 7) / 8 : qty * 2;
-            byte[] pdu = new byte[bytes + 2];
-            pdu[0] = fc;
-            pdu[1] = (byte)bytes;
-            for (int i = 0; i < bytes; i++) pdu[i + 2] = ExpectedPatternByte(address, i, bitFc);
-            return ModbusRtuClient.BuildFrame(unit, pdu);
+            return PatternReply(unit, fc, address, qty);
         }
         if (fc == 3) return ModbusRtuClient.BuildFrame(unit, new byte[] { 3, 10, 0x12, 0x34, 0xFF, 0xFE, 0x40, 0x20, 0x00, 0x00, 0x00, 0x64 });
         if (fc == 1) return ModbusRtuClient.BuildFrame(unit, new byte[] { 1, 2, 0x09, 0x02 });
