@@ -134,16 +134,16 @@ powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 
 `GuiTest.ps1` 86 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı olmadığı (300 register 3 istek, 125 register tek istek, `0` adet ve adres taşması reddi), Modbus exception yanıtı, bağlantı kurulamayan durum, yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme), boyutlandırma (Sizable kenarlık, Buyut kutusu, varsayılan 500×600 içerik, küçültme sınırının 500 px içeriğe inmesi, sütunların sürüklenebilir olması ve `Fill` Tanım sütunu, büyütünce tablonun uzayıp genişlemesi, logun alta yapışması, sağ butonların etikete/kenara taşmaması, büyütülmüş pencerede 200 kayıtlık parçalı okuma, ilerleme geri çağrısının okuma sonunda temizlenmesi), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
 
-### CI
+### CI ve yeni surum yayinlama
 
-`v*` tag'i itildiğinde GitHub Actions (windows-latest) derler, `SelfTest.exe`'yi koşar ve exe'yi release asset olarak yayınlar:
+GitHub Actions iki yolla release yayinlar:
 
-```bash
-git tag v0.7.0
-git push origin v0.7.0
-```
+1. **Git etiketiyle:** `v*` etiketi push edilince Windows ortaminda derleme ve `SelfTest.exe` testleri calisir; testler basariliysa EXE release olarak yayinlanir.
+2. **GitHub arayuzunden:** Actions → **build-and-release** → **Run workflow** sec. Surum alanina `0.8.0` gibi X.Y.Z yaz ve calistir. Workflow, mevcut `main` commitine otomatik `v0.8.0` etiketi olusturur, o etiketten derler, testleri kosar ve release'i yayinlar.
 
-Yayınlanan exe'nin adı `ModbusScan-v0.7.0.exe` olur; program tam bu adı `releases/latest` yönlendirmesinden bulduğu etiketle türetir. Etiket adını veya asset adını değiştirirsen güncelleme bozulur.
+Manuel yayinlama icin artik yerel bilgisayarda tag komutu calistirmak gerekmez. Workflow etiketi olusturduktan sonra derleme veya test basarisiz olursa release adimi calismaz; Git etiketi kalir. Duzeltme sonrasi yeni bir surum numarasi kullan.
+
+Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi bu dosya adini `releases/latest` etiketiyle eslestirir; etiket veya asset adlandirmasini degistirme.
 
 ## Dosyalar
 
