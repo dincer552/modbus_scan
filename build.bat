@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set VERSION=0.8.1
+set VERSION=0.9.0
 set CSC=C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 if not exist "%CSC%" set CSC=C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe
 if not exist "%CSC%" (
@@ -12,8 +12,17 @@ if not exist "%CSC%" (
 
 if not exist dist mkdir dist
 
+rem Exe dosya simgesi: assets\ModbusScan.ico (tools\MakeIcon.ps1 uretir, depoda durur).
+set ICON=assets\ModbusScan.ico
+set ICONFLAG=
+if not exist "%ICON%" (
+  echo Simge yok: tools\MakeIcon.ps1 ile uretiliyor...
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\MakeIcon.ps1
+)
+if exist "%ICON%" (set ICONFLAG=/win32icon:%ICON%) else (echo UYARI: simge uretilemedi, varsayilan ikonla derleniyor.)
+
 echo [1/3] ModbusScan.exe derleniyor...
-"%CSC%" /nologo /target:winexe /optimize+ /platform:anycpu ^
+"%CSC%" /nologo /target:winexe /optimize+ /platform:anycpu %ICONFLAG% ^
   /reference:System.dll /reference:System.Management.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll ^
   /out:dist\ModbusScan.exe ^
   src\ModbusTcp.cs src\ModbusRtu.cs src\Updater.cs src\WriteDialog.cs src\MainForm.cs src\Program.cs

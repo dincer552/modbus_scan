@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
@@ -36,6 +37,8 @@ namespace ModbusScan
         private readonly Dictionary<string, string> _portLabels = new Dictionary<string, string>();
         private string _portLabelKey = "";
         private ContextMenuStrip _definitionMenu;
+        private ContextMenuStrip _appMenu;
+        private Icon _appIcon;
 
         public MainForm()
         {
@@ -67,6 +70,7 @@ namespace ModbusScan
             MinimumSize = new Size(ClientSize.Width + (Size.Width - ClientSize.Width), 430);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Segoe UI", 8.25f);
+            LoadAppIcon();
 
             gbConnection = new GroupBox();
             gbConnection.Text = "Bağlantı";
@@ -296,6 +300,8 @@ namespace ModbusScan
             _definitionMenu.Opening += OnDefinitionMenuOpening;
             grid.ContextMenuStrip = _definitionMenu;
 
+            BuildAppMenu();
+
             txtLog = new TextBox();
             txtLog.SetBounds(8, 478, 484, 114);
             txtLog.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
@@ -315,6 +321,162 @@ namespace ModbusScan
 
             UpdateDecodeControls();
             AcceptButton = btnRead;
+        }
+
+        /// <summary>
+        /// Pencere ve görev çubuğu simgesi: build.bat /win32icon ile exe'ye gömülen assets\ModbusScan.ico.
+        /// Assembly konumundan okunur; kısayoldan veya yansıtarak (test) çalıştırıldığında da doğru exe bulunur.
+        /// </summary>
+        private void LoadAppIcon()
+        {
+            try
+            {
+                string path = typeof(MainForm).Assembly.Location;
+                if (path.Length == 0 || !File.Exists(path)) return;
+                Icon icon = Icon.ExtractAssociatedIcon(path);
+                if (icon == null) return;
+                _appIcon = icon;
+                Icon = icon;
+            }
+            catch (Exception)
+            {
+                // Simgesiz de çalışır: Windows varsayılan uygulama simgesi kalır.
+            }
+        }
+
+        /// <summary>Pencere sag tik menuyu: masaustu ve Baslat Menuusu kisayol islemleri.</summary>
+        private void BuildAppMenu()
+        {
+            _appMenu = new ContextMenuStrip();
+            _appMenu.Items.Add("Masaüstü + Başlat Menüsü kısayolu oluştur", null, OnCreateShortcuts);
+            _appMenu.Items.Add("Kısayolları kaldır", null, OnRemoveShortcuts);
+            ContextMenuStrip = _appMenu;
+            // Özet satırı her zaman görünür: butonların yerini bozmadan menüye oradan da erişilebiliyor.
+            lblSummary.ContextMenuStrip = _appMenu;
+        }
+
+        private const string ShortcutName = "Modbus Scan.lnk";
+
+        private static string DesktopDirectory()
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        }
+
+        private static string StartMenuDirectory()
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        }
+
+        private void OnCreateShortcuts(object sender, EventArgs e)
+        {
+            string exe = Application.ExecutablePath;
+            try
+            {
+                string[] written = CreateShortcutsIn(DesktopDirectory(), StartMenuDirectory(), exe);
+                if (written.Length == 0)
+                {
+                    lblSummary.Text = "Kısayol yazılacak klasör bulunamadı.";
+                    return;
+                }
+                for (int i = 0; i < written.Length; i++) Log("Kısayol oluşturuldu: " + written[i]);
+                if (IsTemporaryLocation(exe))
+                    Log("UYARI: program geçici klasörde; silinirse kısayollar bozulur. Önce kalıcı bir klasöre taşı.");
+                lblSummary.Text = written.Length + " kısayol oluşturuldu (masaüstü + Başlat Menüsü).";
+            }
+            catch (Exception ex)
+            {
+                lblSummary.Text = "Kısayol oluşturulamadı: " + ShortMessage(ex);
+                Log("Kısayol hatası: " + ex.Message);
+            }
+        }
+
+        private void OnRemoveShortcuts(object sender, EventArgs e)
+        {
+            int removed = RemoveShortcutsIn(DesktopDirectory(), StartMenuDirectory());
+            lblSummary.Text = removed > 0 ? removed + " kısayol kaldırıldı." : "Kısayol yok, kaldırılacak bir şey bulunamadı.";
+            Log(removed > 0 ? "Kısayol kaldırıldı: " + removed + " dosya." : "Kısayol kaldırma: dosya bulunamadı.");
+        }
+
+        /// <summary>Test edilebilir çekirdek: kısayolları verilen klasörlere yazar, yazılan yolları döner.</summary>
+        private static string[] CreateShortcutsIn(string desktopDir, string startMenuDir, string exePath)
+        {
+            List<string> written = new List<string>();
+            string[] dirs = new string[] { desktopDir, startMenuDir };
+            for (int i = 0; i < dirs.Length; i++)
+            {
+                string dir = dirs[i];
+                if (dir.Length == 0) continue;
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                string lnk = Path.Combine(dir, ShortcutName);
+                WriteShortcut(lnk, exePath, "Modbus TCP/RS485 test aracı — kayıt okuma, yazma ve tarama");
+                written.Add(lnk);
+            }
+            return written.ToArray();
+        }
+
+        /// <summary>Test edilebilir çekirdek: iki klasördeki kısayolu siler, silinen sayısını döner.</summary>
+        private static int RemoveShortcutsIn(string desktopDir, string startMenuDir)
+        {
+            int removed = 0;
+            string[] dirs = new string[] { desktopDir, startMenuDir };
+            for (int i = 0; i < dirs.Length; i++)
+            {
+                string dir = dirs[i];
+                if (dir.Length == 0) continue;
+                string lnk = Path.Combine(dir, ShortcutName);
+                try
+                {
+                    if (File.Exists(lnk))
+                    {
+                        File.Delete(lnk);
+                        removed++;
+                    }
+                }
+                catch (Exception)
+                {
+                    // Silinemese sorun değil: kullanıcı klasörden elle kaldırabilir.
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>WScript.Shell ile .lnk üretir: hedef, çalışma klasörü ve exe'nin gömülü simgesi (0).</summary>
+        private static void WriteShortcut(string lnkPath, string exePath, string description)
+        {
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) throw new InvalidOperationException("WScript.Shell bulunamadı");
+            object shell = Activator.CreateInstance(shellType);
+            try
+            {
+                object link = shellType.InvokeMember("CreateShortcut",
+                    BindingFlags.InvokeMethod | BindingFlags.Instance | BindingFlags.Public, null, shell,
+                    new object[] { lnkPath });
+                Type linkType = link.GetType();
+                SetComProperty(linkType, link, "TargetPath", exePath);
+                SetComProperty(linkType, link, "WorkingDirectory", Path.GetDirectoryName(exePath));
+                SetComProperty(linkType, link, "IconLocation", exePath + ",0");
+                SetComProperty(linkType, link, "WindowStyle", 1);
+                SetComProperty(linkType, link, "Description", description);
+                linkType.InvokeMember("Save",
+                    BindingFlags.InvokeMethod | BindingFlags.Instance | BindingFlags.Public, null, link, null);
+            }
+            finally
+            {
+                IDisposable com = shell as IDisposable;
+                if (com != null) com.Dispose();
+            }
+        }
+
+        private static void SetComProperty(Type type, object target, string name, object value)
+        {
+            type.InvokeMember(name, BindingFlags.SetProperty | BindingFlags.Instance | BindingFlags.Public,
+                null, target, new object[] { value });
+        }
+
+        private static bool IsTemporaryLocation(string path)
+        {
+            string temp = Path.GetTempPath().TrimEnd('\\', '/');
+            return path.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private static Label MakeLabel(string text, int x, int y)
@@ -1033,6 +1195,9 @@ namespace ModbusScan
 
         private static string DefinitionPath()
         {
+            // GuiTest bu değişkenle geçici bir dosyaya yönlendirir; kullanıcının gerçek tanımlarına dokunmaz.
+            string over = Environment.GetEnvironmentVariable("MODBUSSCAN_DEFINITIONS");
+            if (over != null && over.Trim().Length > 0) return over;
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ModbusScan");
             return Path.Combine(dir, "definitions.txt");
         }

@@ -6,6 +6,7 @@ Okuma: FC01 (coil), FC02 (discrete input), FC03 (holding register), FC04 (input 
 Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda bir hücreye çift tıklayarak.
 Not: her kayıt için kendi adını yazabildiğin **Tanım** sütunu; Excel'den kopyalayıp Ctrl+V ile yapıştırılabilir, Delete tuşu veya sağ tık menüsüyle temizlenebilir.
 Adresi olmayan (ilegal) kayıtlar okumayı bozmaz: hücre hatasıyla işaretlenir, geri kalan kayıtlar okunmaya devam eder.
+Şeffaf arka planlı bir simgesi vardır; masaüstü ve Başlat Menüsü kısayolları sağ tık menüsünden üretilir.
 Tarama ve kayıt sekmesi sonraki sürümlerde eklenecek.
 
 ## İndir
@@ -14,6 +15,24 @@ Releases sayfasındaki `ModbusScan-vX.Y.Z.exe` dosyasını indirip çift tıklam
 <https://github.com/dincer552/modbus_scan/releases/latest>
 
 Ek bir şey kurmana gerek yok — Windows 10/11'de gelen .NET Framework 4.8 ile çalışır.
+
+## Masaüstü ve Başlat Menüsü simgesi
+
+Program tek `.exe` olduğu için kurulum sihirbazı yok; simge ve kısayollar **programın içinden** üretiliyor:
+
+- **Pencereye sağ tık** (boş alan veya alttaki özet satırı) → **Masaüstü + Başlat Menüsü kısayolu oluştur**.
+  Aynı menüdeki **Kısayolları kaldır** iki kısayolu da siler.
+- Kısayol, **çalışan exe'nin yanına** yazılır (`Modbus Scan.lnk`): masaüstü + `Başlat Menüsü → Programlar`. Simge olarak exe'nin içine gömülü `.ico` kullanılır (`IconLocation = exe,0`), açıklama ve çalışma klasörü doldurulur.
+- **Başlat**'a yazıp `Modbus Scan` aratarak da açabilirsin.
+- Exe geçici klasörde (`%TEMP%`) çalışıyorsa log uyarı yazar: dosya silinince kısayol bozulur, önce kalıcı bir klasöre taşı.
+
+Simgenin kendisi (`assets\ModbusScan.ico`) kodla çiziliyor: şeffaf (alfa) arka plan, 16/24/32/48/64/128/256 px. 48 px ve altında detaylar sadeleşiyor — 16 px'te sadece çerçeve + sinyal dalgası kalır, böylece küçük görünümde bulanıklaşmıyor.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\MakeIcon.ps1   # assets\ModbusScan.ico + dist\icon-preview\*.png
+```
+
+`build.bat` bu dosyayı `/win32icon:` ile exe'ye gömer (Yükleleyici/Gezginde görünen simge), pencere ve görev çubuğu simgesi de çalışma sırasında aynı gömülü simgeden alınır (`Icon.ExtractAssociatedIcon`). `.ico` eksikse `build.bat` kendisi üretir; CI aynen bunu kullanır.
 
 ## Kullanım
 
@@ -98,8 +117,8 @@ Pencerede gönderilecek baytlar **önizleme** satırında görünür — örn. `
 Pencerenin altındaki şerit programın kendi güncelliğini takip eder:
 
 - Program açıldıktan ~1 saniye sonra bir kez, sonra **her 60 saniyede** GitHub'daki en yeni release etiketi sorgulanır.
-- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.8.1 (59.0 KB)`) ve **Güncelle** butonu aktif olur.
-- Sürüm sende ise gri `Güncel: v0.8.1 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
+- Yeni sürüm varsa satır **yeşile** döner (`YENİ sürüm var: v0.9.0 (59.0 KB)`) ve **Güncelle** butonu aktif olur.
+- Sürüm sende ise gri `Güncel: v0.9.0 · son kontrol 08:31` yazarsın; ağ yoksa satır gri kalır ve denemeye devam eder.
 - **Denetle** butonu aynı sorguyu elle, hemen yaptırır (log satırında sonucu görünür).
 - **Güncelle** exe'yi geçici klasöre indirir, boyutunu ve `MZ` başlığını doğrular, sonra kendini değiştiren kısa bir betik başlatır: program kapanır, betik dosya kilidi çözülünce yenisiyle değiştirip uygulamayı yeniden açar. Değişim olmazsa eski exe açılır ve sürüm sayfası tarayıcıda açılır.
 - İndirme sırasında sağ tıklamaya gerek yok; buton **Sayfayı aç** olur ve sürüm sayfasına gider (asset henüz hazır değilse).
@@ -119,6 +138,7 @@ build.bat
 ```
 
 Çıktı: `dist\ModbusScan.exe` (GUI), `dist\SelfTest.exe` (kendi kendine test) ve `dist\Probe.exe` (konsol okuma aracı).
+`assets\ModbusScan.ico` eksikse önce `tools\MakeIcon.ps1` çalıştırılır, sonra exe `/win32icon:` ile o simgeyi içine alarak derlenir.
 
 ### Testler
 
@@ -151,9 +171,9 @@ dist\Probe.exe --com COM3 --baud 9600 --parity N --stop 1 --unit 1 --fc 3 --addr
 powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 ```
 
-> `GuiTest.ps1` çalışırken kendi tanılarını `%APPDATA%\ModbusScan\definitions.txt` dosyasına yazar; betik bittiğinde (yarıda bir hata olsa bile) dosyayı başladığı içeriğe geri yükler.
+> `GuiTest.ps1` tanımları **senin `%APPDATA%\ModbusScan\definitions.txt` dosyana yazmaz**: betik `MODBUSSCAN_DEFINITIONS` ortam değişkeniyle geçici bir dosyaya yönlendirir ve sonda gerçek dosyanın baytlarının değişmediğini ayrıca doğrular. Kısayol testleri de masaüstüne değil geçici klasöre yazar.
 
-`GuiTest.ps1` 115 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı olmadığı (300 register 3 istek, 125 register tek istek, `0` adet ve adres taşması reddi), Modbus exception yanıtı (tek adreslik okumada bile satırın `ilegal hata 02` olarak işaretlenmesi), bağlantı kurulamayan durum, hata toleransı (yasadisi 400/401/450 kayıtlarının işaretlenip 200 satırlık aralığın tam dolması, yalnızca üç kaydın hatalı sayılması, hatasız satırların değer göstermesi, özet ve logda hata adedi, hatalı hücrenin rengi ve ipucu, hatalı satırdan yazma penceresinin açılması, hiçbir satıra cevap vermeyen aralıkta okumanın `Üst üste 5 kayıt` gerekçesiyle durması, bağlantının kapanmaması ve sonraki okumanın çalışması), yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme, Delete tuşu ve sağ tık ile tek satır temizleme, toplu temizlemenin onay sonrası hem tabloyu hem dosyayı boşaltması, yazı yokken menü seçeneklerinin pasif kalması), boyutlandırma (Sizable kenarlık, Buyut kutusu, varsayılan 500×600 içerik, küçültme sınırının 500 px içeriğe inmesi, sütunların sürüklenebilir olması ve `Fill` Tanım sütunu, büyütünce tablonun uzayıp genişlemesi, logun alta yapışması, sağ butonların etikete/kenara taşmaması, büyütülmüş pencerede 200 kayıtlık parçalı okuma, ilerleme geri çağrısının okuma sonunda temizlenmesi), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi).
+`GuiTest.ps1` 132 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı olmadığı (300 register 3 istek, 125 register tek istek, `0` adet ve adres taşması reddi), Modbus exception yanıtı (tek adreslik okumada bile satırın `ilegal hata 02` olarak işaretlenmesi), bağlantı kurulamayan durum, hata toleransı (yasadisi 400/401/450 kayıtlarının işaretlenip 200 satırlık aralığın tam dolması, yalnızca üç kaydın hatalı sayılması, hatasız satırların değer göstermesi, özet ve logda hata adedi, hatalı hücrenin rengi ve ipucu, hatalı satırdan yazma penceresinin açılması, hiçbir satıra cevap vermeyen aralıkta okumanın `Üst üste 5 kayıt` gerekçesiyle durması, bağlantının kapanmaması ve sonraki okumanın çalışması), yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme, Delete tuşu ve sağ tık ile tek satır temizleme, toplu temizlemenin onay sonrası hem tabloyu hem dosyayı boşaltması, yazı yokken menü seçeneklerinin pasif kalması), boyutlandırma (Sizable kenarlık, Buyut kutusu, varsayılan 500×600 içerik, küçültme sınırının 500 px içeriğe inmesi, sütunların sürüklenebilir olması ve `Fill` Tanım sütunu, büyütünce tablonun uzayıp genişlemesi, logun alta yapışması, sağ butonların etikete/kenara taşmaması, büyütülmüş pencerede 200 kayıtlık parçalı okuma, ilerleme geri çağrısının okuma sonunda temizlenmesi), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi) ve simge/kısayol (`.ico` başlığının geçerli ve çok boyutlu olması, pencere simgesinin exe'den gelmesi, sağ tık menüsünün iki seçeneği, özet satırının aynı menüye bağlı olması, kısayolların hedef/simge/çalışma klasörü/açıklama alanları, kaldırınca iki dosyanın silinmesi ve tekrar çağrıda sessiz kalması, geçici klasör hedefinin ayrıştırılması, kullanıcının `%APPDATA%` tanım dosyasının test boyunca bayt bayt aynı kalması).
 
 ### CI ve yeni surum yayinlama
 
@@ -174,12 +194,14 @@ Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi 
 | `src/ModbusRtu.cs` | RS485/seri taşıması: SerialPort açma, COM listesi ve `Win32_PnPEntity` sürücü açıklamaları, `birim id + PDU + CRC16` çerçeveleme, yanıt uzunluğunu byte count'tan çözme, zaman aşımı ve yarım çerçeve temizliği |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
 | `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) — TCP/RS485 ayrımı yoktur, ortak istemciyi kullanır |
-| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, log alanı |
+| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
 | `tools/SelfTest.cs` | Loopback soket + sahte seri akış ile çerçeve/protokol seviyesinde kendi kendine test (CI bunu koşar) |
 | `tools/Probe.cs` | Konsol okuma aracı (`--ip/--port` veya `--com/--baud/--parity/--stop`, `--list-ports`, `--tolerant`) |
 | `tools/FakeServer.ps1` | Sahte Modbus TCP sunucusu (yasadisi 400/401/450, yanıtsız 60000..60099, `9000+` exception 2) |
 | `tools/GuiTest.ps1` | Arayüz mantığını yansıtma ile test eden betik |
+| `tools/MakeIcon.ps1` | İkonu GDI+ ile çizip `assets\ModbusScan.ico` (16–256 px, şeffaf) ve `dist\icon-preview\*.png` üretir |
+| `assets/ModbusScan.ico` | Exe'ye gömülen simge (`build.bat` → `/win32icon`) |
 
 ## Bilinen sınırlar
 
@@ -190,5 +212,6 @@ Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi 
 - RS485 zaman aşımı cihazın cevap vermemesi anlamına gelir: port açık kalır, **OKU** ile farklı adresi deneyebilirsin; **Kes** portu bırakır.
 - Seri port tek sahiplidir: aynı COM portunu başka bir program (PLC yazılımı, terminal) kullanıyorsa **Bağlan** "erişim engellendi" hatası verir.
 - Tanımlar bilgisayarda, adres bazlı tutulur; cihazdan isim okunamaz ve iki farklı cihaz aynı adres için aynı tanımı paylaşır.
+- Kısayol, **o an çalıştırılan exe'nin yolunu** hedefler. Exe'yi başka bir klasöre taşırsan kısayolu yeni yerden bir kez daha oluştur (eskisini "Kısayolları kaldır" ile temizleyebilirsin).
 - TCP'de hata durumunda bağlantı kapanır, **Bağlan** ile yeniden dene.
 - Güncelleme denetimi ağa çıkabilmek için TLS 1.2 destekleyen bir Windows sürümü ister; proxy arkasında `github.com` erişimi kapalıysa satır `Denetlenemedi` gösterir ve okuma tarafı bundan etkilenmez.

@@ -71,6 +71,7 @@ namespace ModbusScan
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
+            ShowIcon = false;   // modal pencere: ana pencerenin simgesini degil, simgesiz baslik kullanir
             StartPosition = FormStartPosition.CenterParent;
             Font = new Font("Segoe UI", 8.25f);
 

@@ -126,19 +126,20 @@ function Dialog-Write {
 
 $fail = 0
 
-# Kullanicinin kendi tanim dosyasi test kirliliginden korunur; sonda geri konur.
-$defPath = Join-Path $env:APPDATA 'ModbusScan\definitions.txt'
-$defBackup = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { $null }
+# Kullanicinin tanim dosyasina HIC dokunulmaz: MODBUSSCAN_DEFINITIONS ile testler gecici bir
+# dosyaya yonlendirilir. (Yedekle-geri yukle yaklasimi, yarida kalan bir calismada kullanici
+# kayitlarini bosaltabildiği icin birakildi.)
+$defDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'mscan-defs-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+[System.IO.Directory]::CreateDirectory($defDir) | Out-Null
+$defPath = [System.IO.Path]::Combine($defDir, 'definitions.txt')
+$env:MODBUSSCAN_DEFINITIONS = $defPath
+$userDefPath = [System.IO.Path]::Combine($env:APPDATA, 'ModbusScan', 'definitions.txt')
+$userDefBefore = if (Test-Path $userDefPath) { [System.IO.File]::ReadAllBytes($userDefPath) } else { $null }
 
-# Beklenmeyen hata betigi yarida birakirsa bile kullanici tanimlari geri yuklenir.
+# Beklenmeyen hata: gecici klasor temizlenir, kullanici dosyasi yine de kontrol edilir.
 trap {
     Write-Host ('HATA  betik kesildi: ' + $_.Exception.Message)
-    if ($null -eq $defBackup) {
-        if (Test-Path $defPath) { Remove-Item $defPath -Force }
-    } else {
-        [System.IO.File]::WriteAllText($defPath, $defBackup, (New-Object System.Text.UTF8Encoding($false)))
-    }
-    Write-Host 'tanim dosyasi yedekten geri yuklendi'
+    if (Test-Path $defDir) { Remove-Item $defDir -Recurse -Force }
     exit 8
 }
 
@@ -348,9 +349,8 @@ Invoke-Handler $form 'OnRead'
 $rows = @(Get-GridRows $form)
 Assert (@($rows[0] -split '\|')[3].Trim() -eq 'satir 1') 'okuma tekrarlaninca tanim korundu' $rows[0]
 
-$defFile = Join-Path $env:APPDATA 'ModbusScan\definitions.txt'
-$fileText = if (Test-Path $defFile) { [System.IO.File]::ReadAllText($defFile) } else { '' }
-Assert ($fileText -like "*3`t0`tsatir 1*") 'tanim dosyasi fc/adres/metin olarak yazildi' ($fileText -replace "`r?`n", ' / ')
+$fileText = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { '' }
+Assert ($fileText -like "*3`t0`tsatir 1*") 'tanim dosyasi fc/adres/metin olarak yazildi' (($fileText -split "`r?`n" | Where-Object { $_ -like '3`t0*' }) -join ' / ')
 
 # Ctrl+V gercek pano yolu: pano kilitli/ersilemezse uygulama cokmemeli (son satira yazar, diger kontrolleri bozmaz)
 $grid.CurrentCell = $grid.Rows[$grid.Rows.Count - 1].Cells['colDef']
@@ -672,6 +672,70 @@ Assert (-not $menu.Items[0].Enabled -and -not $menu.Items[1].Enabled) 'sutun bos
     ('satir=' + $menu.Items[0].Enabled + ' butun=' + $menu.Items[1].Enabled)
 $clear.Close()
 
+# --- Simge (ikon) ve kisayol menuyu ---
+# Kisayollar KULLANICININ MASASTUSUNE YAZILMAZ: gecici klasore yazilip silinir.
+function Invoke-Static([string]$Name, $Arguments) {
+    # Private static metot: yansitma cagrisinda elemanlar sade [string]/[int] olmali, PSObject sarmalanirsa hata verir.
+    $method = $type.GetMethod($Name, [Reflection.BindingFlags]'NonPublic,Static')
+    if ($null -eq $method) { throw "Statik metot bulunamadi: $Name" }
+    return $method.Invoke($null, $Arguments)
+}
+
+$icoPath = (Resolve-Path "$PSScriptRoot\..\assets\ModbusScan.ico").Path
+$icoBytes = [System.IO.File]::ReadAllBytes($icoPath)
+$icoCount = [BitConverter]::ToUInt16($icoBytes, 4)
+$icoType = [BitConverter]::ToUInt16($icoBytes, 2)
+Assert ($icoBytes[0] -eq 0 -and $icoBytes[1] -eq 0 -and $icoType -eq 1 -and $icoCount -ge 4) `
+    'ico dosyasi gecerli ve cok boyutlu' ("tip=$icoType boyut=$icoCount")
+
+$iconForm = [Activator]::CreateInstance($type)
+$winIcon = $iconForm.Icon
+Assert ($null -ne $winIcon) 'pencere simgesi atanmis' 'Icon = null'
+Assert ($winIcon.Width -eq 32 -and $winIcon.Height -eq 32) 'pencere simgesi 32x32' `
+    ("{0}x{1}" -f $winIcon.Width, $winIcon.Height)
+
+$appMenu = Get-Field $iconForm '_appMenu'
+Assert ((Get-Field $iconForm 'grid').ContextMenuStrip -ne $appMenu -and $iconForm.ContextMenuStrip -eq $appMenu) `
+    'pencere sag tik menusu kisayol menuyu' ('form menuyesi eslesmedi')
+Assert ($appMenu.Items.Count -eq 2) 'kisayol menuyu iki secenek iceriyor' ("sayi=" + $appMenu.Items.Count)
+Assert ($appMenu.Items[0].Text.StartsWith('Masa') -and $appMenu.Items[1].Text.StartsWith('K')) `
+    'menu metinleri kisayol islemlerini aciyor' ($appMenu.Items[0].Text + ' / ' + $appMenu.Items[1].Text)
+Assert ((Get-Field $iconForm 'lblSummary').ContextMenuStrip -eq $appMenu) 'ozet satiri da ayni menusuya bagli' 'baglantisi yok'
+
+$exePath = (Resolve-Path "$PSScriptRoot\..\dist\ModbusScan.exe").Path
+$salt = [Guid]::NewGuid().ToString('N').Substring(0, 8)
+# Combine ile: Join-Path'e metot grubu verilince PSObject sarmali uretiyor, yansitma cagrisi bunu kabul etmiyor.
+$tmpRoot = [System.IO.Path]::GetTempPath()
+$tmpDesk = [System.IO.Path]::Combine($tmpRoot, 'mscan-desk-' + $salt)
+$tmpStart = [System.IO.Path]::Combine($tmpRoot, 'mscan-start-' + $salt)
+try {
+    $written = Invoke-Static 'CreateShortcutsIn' @([string]$tmpDesk, [string]$tmpStart, [string]$exePath)
+    Assert ($written.Count -eq 2) 'iki kisayol yazildi' ("yazan=" + ($written -join ','))
+    Assert ((Test-Path $written[0]) -and (Test-Path $written[1])) 'kisayol dosyalari diskte' 'eksik dosya'
+
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($written[0])
+    Assert ($link.TargetPath -eq $exePath) 'kisayol hedefi exe yi gosteriyor' ($link.TargetPath)
+    Assert ($link.IconLocation -eq ($exePath + ',0')) 'kisayol simgesi exe den aliniyor' ($link.IconLocation)
+    Assert ($link.WorkingDirectory -eq (Split-Path $exePath -Parent)) 'calisma klasoru exe klasoru' ($link.WorkingDirectory)
+    Assert ([string]::IsNullOrEmpty($link.Description) -eq $false) 'kisayol aciklamasi dolu' 'aciklama bos'
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+
+    $removed = Invoke-Static 'RemoveShortcutsIn' @([string]$tmpDesk, [string]$tmpStart)
+    Assert ($removed -eq 2 -and -not (Test-Path $written[0]) -and -not (Test-Path $written[1])) `
+        'kisayollar kaldiriliyor' ("silinen=$removed")
+    $again = Invoke-Static 'RemoveShortcutsIn' @([string]$tmpDesk, [string]$tmpStart)
+    Assert ($again -eq 0) 'kisayol yokken kaldiirme sessiz' ("silinen=$again")
+} finally {
+    foreach ($d in @($tmpDesk, $tmpStart)) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+}
+
+$tmpReal = [System.IO.Path]::Combine($tmpRoot, 'mscan-real-' + $salt + '.exe')
+$isTemp = [bool](Invoke-Static 'IsTemporaryLocation' @([string]$tmpReal))
+$isRepo = [bool](Invoke-Static 'IsTemporaryLocation' @([string]$exePath))
+Assert ($isTemp -and -not $isRepo) 'gecici klasor hedefi ayirdediliyor' ("temp=$isTemp depo=$isRepo")
+$iconForm.Close()
+
 if (-not $SkipOfflineCheck) {
     $offline = [Activator]::CreateInstance($type)
     (Get-Field $offline 'txtIp').Text = '127.0.0.1'
@@ -690,11 +754,15 @@ if (-not $SkipOfflineCheck) {
     $offline.Close()
 }
 
-if ($null -eq $defBackup) {
-    if (Test-Path $defPath) { Remove-Item $defPath -Force }
-} else {
-    [System.IO.File]::WriteAllText($defPath, $defBackup, (New-Object System.Text.UTF8Encoding($false)))
+# Kullanicinin kendi tanim dosyasina dokunulmadigini dogrula ve gecici klasoru topla.
+$userDefAfter = if (Test-Path $userDefPath) { [System.IO.File]::ReadAllBytes($userDefPath) } else { $null }
+$untouched = ($null -eq $userDefBefore -and $null -eq $userDefAfter)
+if (-not $untouched -and $null -ne $userDefBefore -and $null -ne $userDefAfter) {
+    $untouched = ([System.BitConverter]::ToString($userDefBefore) -eq [System.BitConverter]::ToString($userDefAfter))
 }
+Assert $untouched 'kullanici tanim dosyasina dokunulmadi' ('farkli baytlar: ' + $userDefBefore.Length + ' -> ' + $userDefAfter.Length)
+
+if (Test-Path $defDir) { Remove-Item $defDir -Recurse -Force }
 
 Write-Host ('SONUC: {0} hata' -f $fail)
 exit $fail
