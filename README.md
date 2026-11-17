@@ -7,7 +7,7 @@ Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda
 Not: her kayıt için kendi adını yazabildiğin **Tanım** sütunu; Excel'den kopyalayıp Ctrl+V ile yapıştırılabilir, Delete tuşu veya sağ tık menüsüyle temizlenebilir.
 Adresi olmayan (ilegal) kayıtlar okumayı bozmaz: hücre hatasıyla işaretlenir, geri kalan kayıtlar okunmaya devam eder.
 Şeffaf arka planlı bir simgesi vardır; masaüstü ve Başlat Menüsü kısayolları sağ tık menüsünden üretilir.
-Tarama ve kayıt sekmesi sonraki sürümlerde eklenecek.
+**Tarama paneli**: kaydedilmiş çoklu aralıkları (ad, fonksiyon, başlangıç/bitiş, çözümleme) işaretleyip **TARA** ile tek seferde okuyun; sonuçlar ana tabloya segment başlıklarıyla eklenir, plan `%APPDATA%\ModbusScan\scanplan.txt` kalıcı.
 
 ## İndir
 
@@ -94,6 +94,23 @@ Kayıtların adını programın kendisi değil **sen** belirlersin: **Tanım** s
 - **Excel'den yapıştırmak:** Excel'de tanım sütununu kopyala, programda bir satıra tıkla, **Ctrl+V**'ye bas. Satır satır metin o satırdan itibaren Tanım'a dağıtılır; Excel'in sonda bıraktığı boş satır yok sayılır, kopya tablodan uzunsaysa sığmayan kısım log'a yazılır. Birden çok sütun kopyaladıysan her satırın ilk alanı alınır.
 - **Kalıcılık:** tanımlar fonksiyon kodu + PDU adresi ile birlikte `%APPDATA%\ModbusScan\definitions.txt` dosyasına yazılır. Programı kapatıp açtığında, adresi veya adedi değiştirdiğinde notların kaybolmaz; `Temizle` yalnızca tabloyu boşaltır, dosyaya dokunmaz.
 - **Paylaşım:** dosya düz metindir, olduğu gibi yedeklenir. Her satır üç alan taşır ve alanlar tab ile ayrılır: fonksiyon kodu, PDU adresi, tanım. Örneğin `3 0 sicaklik set` FC03 · adres 0 için tanımdır.
+
+## Tarama paneli (çoklu aralık tarama)
+
+Okuma kutusunun altında **Tarama** grubu vardır (kayıtlı segment yoksa gizlidir). Burada istenen kadar segment tanımlanır:
+
+- **✓** — segment tarama işaretli mi
+- **Ad** — kullanıcı görünen adı (örn. `Fan Set`, `Motor 1`)
+- **FC** — fonksiyon kodu: çift tıkla `03 → 04 → 01 → 02 → 03` döner
+- **Başlangıç** — PDU adresi (0 tabanlı)
+- **Adet** — kaç kayıt okunacak
+- **Çözümleme** — `uint16 / int16 / Hex / Float32 / Uint32 / Int32` (yukarıdaki Değer kutusuyla aynı)
+- **Kelime** — `ABCD / CDAB / BADC / DCBA` (32-bit türlerde)
+- **4xx** — `4xxxx` adres gösterimi
+
+**Ekle** butonu mevcut bağlantı/okuma ayarlarından bir segment önerir; **Sil** seçili satırı kaldırır; plan `%APPDATA%\ModbusScan\scanplan.txt` dosyasına otomatik kaydedilir, program açılışında geri yüklenir.
+
+**TARA** butonu: bağlantı varken işaretli segmentleri sırayla okur (her segment kendi fonksiyon/adres/çözümleme ayarlarıyla). Sonuçlar ana tabloya eklenir; her segmentten önce **gri başlık satırı** (`--- Ad (FCxx baş..bit) ---`) konur, böylece nereden ne okundu belli olur. Hatalı kayıtlar diğer segmentleri engellemez (hata toleranslı okuma çalışır). Özet satır ve log'ta `Tarama tamamlandı: N / M kayıt` yazar.
 
 ## Hücreye çift tıkla → yaz
 
@@ -194,7 +211,7 @@ Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi 
 | `src/ModbusRtu.cs` | RS485/seri taşıması: SerialPort açma, COM listesi ve `Win32_PnPEntity` sürücü açıklamaları, `birim id + PDU + CRC16` çerçeveleme, yanıt uzunluğunu byte count'tan çözme, zaman aşımı ve yarım çerçeve temizliği |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
 | `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) — TCP/RS485 ayrımı yoktur, ortak istemciyi kullanır |
-| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, log alanı |
+| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, **Tarama paneli** (kaydedilmiş çoklu aralıkları tek tıkla oku), log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
 | `tools/SelfTest.cs` | Loopback soket + sahte seri akış ile çerçeve/protokol seviyesinde kendi kendine test (CI bunu koşar) |
 | `tools/Probe.cs` | Konsol okuma aracı (`--ip/--port` veya `--com/--baud/--parity/--stop`, `--list-ports`, `--tolerant`) |

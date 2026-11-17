@@ -40,10 +40,53 @@ namespace ModbusScan
         private ContextMenuStrip _appMenu;
         private Icon _appIcon;
 
+        // Tarama planı
+        private GroupBox gbScan;
+        private DataGridView scanGrid;
+        private Button btnScanAdd, btnScanRemove, btnScanRun;
+        private sealed class ScanSegment
+        {
+            public bool Enabled;
+            public string Name;
+            public byte Function;     // 1,2,3,4
+            public int StartAddress;
+            public int Quantity;
+            public int DecodeIndex;   // cmbDecode index
+            public int WordOrderIndex; // cmbWordOrder index
+            public bool Show4xx;
+            public string ToLine()
+            {
+                return (Enabled ? "1" : "0") + "\t" + Name + "\t" + Function + "\t" + StartAddress + "\t" + Quantity + "\t" + DecodeIndex + "\t" + WordOrderIndex + "\t" + (Show4xx ? "1" : "0");
+            }
+            public static ScanSegment Parse(string line)
+            {
+                string[] p = line.Split('\t');
+                if (p.Length < 8) return null;
+                ScanSegment s = new ScanSegment();
+                s.Enabled = p[0] == "1";
+                s.Name = p[1];
+                byte fc; int sa, q, di, woi;
+                if (!byte.TryParse(p[2], out fc)) return null;
+                if (!int.TryParse(p[3], out sa)) return null;
+                if (!int.TryParse(p[4], out q)) return null;
+                if (!int.TryParse(p[5], out di)) return null;
+                if (!int.TryParse(p[6], out woi)) return null;
+                s.Function = fc;
+                s.StartAddress = sa;
+                s.Quantity = q;
+                s.DecodeIndex = di;
+                s.WordOrderIndex = woi;
+                s.Show4xx = p[7] == "1";
+                return s;
+            }
+        }
+        private readonly List<ScanSegment> _scanSegments = new List<ScanSegment>();
+
         public MainForm()
         {
             BuildUi();
             LoadDefinitions();
+            LoadScanPlan();
             ApplyMode();
             UpdateConnectionState(false);
         }
@@ -301,9 +344,10 @@ namespace ModbusScan
             grid.ContextMenuStrip = _definitionMenu;
 
             BuildAppMenu();
+            BuildScanUi();
 
             txtLog = new TextBox();
-            txtLog.SetBounds(8, 478, 484, 114);
+            txtLog.SetBounds(8, 502, 484, 90);
             txtLog.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             txtLog.Multiline = true;
             txtLog.ReadOnly = true;
@@ -313,6 +357,7 @@ namespace ModbusScan
 
             Controls.Add(gbConnection);
             Controls.Add(gbRead);
+            Controls.Add(gbScan);
             Controls.Add(lblUpdate);
             Controls.Add(btnCheckUpdate);
             Controls.Add(btnUpdate);
@@ -353,6 +398,329 @@ namespace ModbusScan
             ContextMenuStrip = _appMenu;
             // Özet satırı her zaman görünür: butonların yerini bozmadan menüye oradan da erişilebiliyor.
             lblSummary.ContextMenuStrip = _appMenu;
+        }
+
+        /// <summary>Tarama planı paneli: segment listesi + TARA butonu.</summary>
+        private void BuildScanUi()
+        {
+            gbScan = new GroupBox();
+            gbScan.Text = "Tarama";
+            gbScan.SetBounds(8, 196, 484, 28);
+            gbScan.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            gbScan.Visible = false;
+
+            // İçerik: sol tarafta bir DataGridView (segmentler), sağ tarafta butonlar
+            scanGrid = new DataGridView();
+            scanGrid.SetBounds(6, 18, 380, 160);
+            scanGrid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            scanGrid.AllowUserToAddRows = false;
+            scanGrid.AllowUserToDeleteRows = false;
+            scanGrid.AllowUserToResizeRows = false;
+            scanGrid.RowHeadersVisible = false;
+            scanGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            scanGrid.MultiSelect = false;
+            scanGrid.AllowUserToResizeColumns = true;
+            scanGrid.ScrollBars = ScrollBars.Vertical;
+            scanGrid.BackgroundColor = Color.White;
+            scanGrid.BorderStyle = BorderStyle.Fixed3D;
+            scanGrid.Font = new Font("Consolas", 8.25f);
+            scanGrid.Columns.Add(NewColumn("scEnabled", "✓", 28, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("scName", "Ad", 70, DataGridViewAutoSizeColumnMode.None, false));
+            scanGrid.Columns.Add(NewColumn("scFunc", "FC", 30, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("scStart", "Başlangıç", 60, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("scQty", "Adet", 44, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("scDecode", "Çözümleme", 90, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("scWords", "Kelime", 50, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.Columns.Add(NewColumn("sc4xx", "4xx", 30, DataGridViewAutoSizeColumnMode.None, true));
+            scanGrid.CellValueNeeded += ScanGrid_CellValueNeeded;
+            scanGrid.CellValuePushed += ScanGrid_CellValuePushed;
+            scanGrid.CurrentCellDirtyStateChanged += ScanGrid_CurrentCellDirtyStateChanged;
+            scanGrid.CellMouseDoubleClick += ScanGrid_CellMouseDoubleClick;
+
+            btnScanAdd = new Button();
+            btnScanAdd.Text = "Ekle";
+            btnScanAdd.SetBounds(392, 18, 84, 23);
+            btnScanAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanAdd.Click += OnScanAdd;
+
+            btnScanRemove = new Button();
+            btnScanRemove.Text = "Sil";
+            btnScanRemove.SetBounds(392, 44, 84, 23);
+            btnScanRemove.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanRemove.Click += OnScanRemove;
+
+            btnScanRun = new Button();
+            btnScanRun.Text = "TARA";
+            btnScanRun.SetBounds(392, 70, 84, 28);
+            btnScanRun.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanRun.BackColor = Color.FromArgb(0, 128, 0);
+            btnScanRun.ForeColor = Color.White;
+            btnScanRun.Click += OnScanRun;
+
+            gbScan.Controls.Add(scanGrid);
+            gbScan.Controls.Add(btnScanAdd);
+            gbScan.Controls.Add(btnScanRemove);
+            gbScan.Controls.Add(btnScanRun);
+        }
+
+        private void ScanGrid_CellValueNeeded(object sender, DataGridViewCellValueEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _scanSegments.Count) return;
+            ScanSegment s = _scanSegments[e.RowIndex];
+            switch (e.ColumnIndex)
+            {
+                case 0: e.Value = s.Enabled; break;
+                case 1: e.Value = s.Name; break;
+                case 2: e.Value = FunctionName(s.Function); break;
+                case 3: e.Value = s.StartAddress; break;
+                case 4: e.Value = s.Quantity; break;
+                case 5: e.Value = DecodeName(s.DecodeIndex); break;
+                case 6: e.Value = s.WordOrderIndex >= 0 && s.WordOrderIndex < 4 ? (new string[] { "ABCD", "CDAB", "BADC", "DCBA" })[s.WordOrderIndex] : ""; break;
+                case 7: e.Value = s.Show4xx; break;
+            }
+        }
+
+        private void ScanGrid_CellValuePushed(object sender, DataGridViewCellValueEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _scanSegments.Count) return;
+            ScanSegment s = _scanSegments[e.RowIndex];
+            switch (e.ColumnIndex)
+            {
+                case 0: s.Enabled = (bool)e.Value; break;
+                case 1: s.Name = (e.Value ?? "").ToString(); break;
+                case 3:
+                    {
+                        int sa;
+                        string val3 = e.Value != null ? e.Value.ToString() : "";
+                        if (int.TryParse(val3, out sa)) s.StartAddress = sa;
+                    }
+                    break;
+                case 4:
+                    {
+                        int q;
+                        string val4 = e.Value != null ? e.Value.ToString() : "";
+                        if (int.TryParse(val4, out q)) s.Quantity = q;
+                    }
+                    break;
+                case 5:
+                    {
+                        int di;
+                        string val5 = e.Value != null ? e.Value.ToString() : "";
+                        if (int.TryParse(val5, out di) && di >= 0 && di < cmbDecode.Items.Count) s.DecodeIndex = di;
+                    }
+                    break;
+                case 6:
+                    {
+                        int woi;
+                        string val6 = e.Value != null ? e.Value.ToString() : "";
+                        if (int.TryParse(val6, out woi) && woi >= 0 && woi < 4) s.WordOrderIndex = woi;
+                    }
+                    break;
+                case 7: s.Show4xx = (bool)e.Value; break;
+            }
+            SaveScanPlan();
+        }
+
+        private void ScanGrid_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (scanGrid.IsCurrentCellDirty)
+                scanGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+
+        private void ScanGrid_CellMouseDoubleClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _scanSegments.Count) return;
+            if (e.ColumnIndex == 2) // FC sütununa çift tık -> döndür
+            {
+                ScanSegment s = _scanSegments[e.RowIndex];
+                s.Function = NextFunction(s.Function);
+                scanGrid.InvalidateRow(e.RowIndex);
+                SaveScanPlan();
+            }
+        }
+
+        private static byte NextFunction(byte fc)
+        {
+            // 3->4->1->2->3
+            if (fc == 3) return 4;
+            if (fc == 4) return 1;
+            if (fc == 1) return 2;
+            return 3;
+        }
+
+        private static string FunctionName(byte fc)
+        {
+            switch (fc)
+            {
+                case 1: return "01";
+                case 2: return "02";
+                case 3: return "03";
+                case 4: return "04";
+                default: return fc.ToString();
+            }
+        }
+
+        private static string DecodeName(int idx)
+        {
+            string[] names = { "uint16", "int16", "Hex", "Float32", "Uint32", "Int32" };
+            if (idx >= 0 && idx < names.Length) return names[idx];
+            return "";
+        }
+
+        private void OnScanAdd(object sender, EventArgs e)
+        {
+            ScanSegment s = new ScanSegment();
+            s.Enabled = true;
+            s.Name = "Segment" + (_scanSegments.Count + 1);
+            s.Function = SelectedFunction();
+            s.StartAddress = 0;
+            s.Quantity = 10;
+            s.DecodeIndex = cmbDecode.SelectedIndex;
+            s.WordOrderIndex = cmbWordOrder.SelectedIndex;
+            s.Show4xx = chkConvention.Checked;
+            _scanSegments.Add(s);
+            scanGrid.RowCount = _scanSegments.Count;
+            scanGrid.Invalidate();
+            SaveScanPlan();
+        }
+
+        private void OnScanRemove(object sender, EventArgs e)
+        {
+            int idx = -1;
+            if (scanGrid.CurrentCell != null) idx = scanGrid.CurrentCell.RowIndex;
+            if (idx < 0 || idx >= _scanSegments.Count) return;
+            _scanSegments.RemoveAt(idx);
+            scanGrid.RowCount = _scanSegments.Count;
+            scanGrid.Invalidate();
+            SaveScanPlan();
+        }
+
+        private void OnScanRun(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected)
+            {
+                lblSummary.Text = "Önce Bağlan butonuyla bağlantı kurun.";
+                return;
+            }
+            int enabled = 0;
+            for (int i = 0; i < _scanSegments.Count; i++) if (_scanSegments[i].Enabled) enabled++;
+            if (enabled == 0)
+            {
+                lblSummary.Text = "Tarama için en az bir segment işaretli olmalı.";
+                return;
+            }
+            RunScanAsync();
+        }
+
+        private void RunScanAsync()
+        {
+            btnScanRun.Enabled = false;
+            btnScanRun.Text = "Taranıyor...";
+            btnRead.Enabled = false;
+
+            System.Threading.Thread worker = new System.Threading.Thread(delegate()
+            {
+                int totalDone = 0;
+                int totalExpected = 0;
+                foreach (ScanSegment s in _scanSegments)
+                    if (s.Enabled) totalExpected += s.Quantity;
+
+                int overallDone = 0;
+                for (int i = 0; i < _scanSegments.Count; i++)
+                {
+                    ScanSegment s = _scanSegments[i];
+                    if (!s.Enabled) continue;
+
+                    byte fc = s.Function;
+                    int start = s.StartAddress;
+                    int qty = s.Quantity;
+                    int decodeIdx = s.DecodeIndex;
+                    int wordIdx = s.WordOrderIndex;
+                    bool show4xx = s.Show4xx;
+
+                    // Başlık satırı ekle
+                    Ui(delegate
+                    {
+                        int row = grid.Rows.Add();
+                        grid.Rows[row].Cells["colIndex"].Value = s.Name;
+                        grid.Rows[row].Cells["colAddress"].Value = "";
+                        grid.Rows[row].Cells["colValue"].Value = "--- " + s.Name + " (FC" + FunctionName(fc) + " " + start + ".." + (start + qty - 1) + ") ---";
+                        grid.Rows[row].Cells["colDef"].Value = "";
+                        grid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
+                        grid.Rows[row].DefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
+                    });
+
+                    // Okuma: ModbusClient.ReadTolerant kullan
+                    int timeoutMs;
+                    if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100) timeoutMs = 2000;
+                    RegisterRead read = Client.ReadTolerant(fc, start, qty, timeoutMs);
+                    if (read == null)
+                    {
+                        Ui(delegate
+                        {
+                            int row = grid.Rows.Add();
+                            grid.Rows[row].Cells["colIndex"].Value = "";
+                            grid.Rows[row].Cells["colAddress"].Value = start;
+                            grid.Rows[row].Cells["colValue"].Value = "okunmadi (bağlantı yok)";
+                            grid.Rows[row].DefaultCellStyle.ForeColor = Color.Red;
+                        });
+                        continue;
+                    }
+
+                    int errors = read.ErrorCount;
+                    for (int r = 0; r < qty; r++)
+                    {
+                        int addr = start + r;
+                        string valText;
+                        string errorText = null;
+                        if (read.ItemErrors != null && r < read.ItemErrors.Length)
+                        {
+                            errorText = read.ItemErrors[r];
+                        }
+                        if (errorText != null)
+                        {
+                            valText = errorText;
+                        }
+                        else
+                        {
+                            valText = ValueOf(read, r, fc == 1 || fc == 2, decodeIdx, (WordOrder)wordIdx);
+                        }
+
+                        Ui(delegate
+                        {
+                            int row = grid.Rows.Add();
+                            grid.Rows[row].Cells["colIndex"].Value = "";
+                            grid.Rows[row].Cells["colAddress"].Value = show4xx ? ModbusTcpClient.DisplayAddress(fc, addr, true).ToString() : addr.ToString();
+                            grid.Rows[row].Cells["colValue"].Value = valText;
+                            string def = DefinitionOf(fc, addr);
+                            if (def.Length > 0) grid.Rows[row].Cells["colDef"].Value = def;
+                            if (errorText != null)
+                            {
+                                grid.Rows[row].Cells["colValue"].Style.ForeColor = Color.Red;
+                                grid.Rows[row].Cells["colValue"].ToolTipText = errorText;
+                            }
+                        });
+
+                        overallDone++;
+                        if (overallDone % 20 == 0)
+                        {
+                            int finalOverall = overallDone;
+                            Ui(delegate { lblSummary.Text = "Tarama: " + finalOverall + " / " + totalExpected + " kayıt"; });
+                        }
+                    }
+                }
+
+                Ui(delegate
+                {
+                    btnScanRun.Enabled = true;
+                    btnScanRun.Text = "TARA";
+                    btnRead.Enabled = Client.IsConnected;
+                    lblSummary.Text = "Tarama tamamlandı: " + overallDone + " kayıt" + (totalExpected > overallDone ? " (bazı hatalı)" : "");
+                    Log("Tarama bitti: " + overallDone + " / " + totalExpected + " kayıt");
+                });
+            });
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         private const string ShortcutName = "Modbus Scan.lnk";
@@ -1246,6 +1614,62 @@ namespace ModbusScan
             catch (Exception ex)
             {
                 Log("Tanımlar kaydedilemedi: " + ex.Message);
+            }
+        }
+
+        private static string ScanPlanPath()
+        {
+            // Test izolasyonu için: MODBUSSCAN_SCANPLAN ortam değişkeniyle geçici dosyaya yönlendir.
+            string over = Environment.GetEnvironmentVariable("MODBUSSCAN_SCANPLAN");
+            if (over != null && over.Trim().Length > 0) return over;
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ModbusScan");
+            return Path.Combine(dir, "scanplan.txt");
+        }
+
+        private void LoadScanPlan()
+        {
+            try
+            {
+                string path = ScanPlanPath();
+                if (!File.Exists(path)) return;
+                string[] lines = File.ReadAllLines(path, new UTF8Encoding(false));
+                _scanSegments.Clear();
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    ScanSegment s = ScanSegment.Parse(lines[i]);
+                    if (s != null) _scanSegments.Add(s);
+                }
+                if (scanGrid != null)
+                {
+                    scanGrid.RowCount = _scanSegments.Count;
+                    scanGrid.Invalidate();
+                }
+                // Eğer segment varsa tarama panelini göster
+                if (_scanSegments.Count > 0 && gbScan != null)
+                {
+                    gbScan.Visible = true;
+                    gbScan.Height = Math.Max(28, 28 + Math.Min(_scanSegments.Count, 6) * 22 + 10);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void SaveScanPlan()
+        {
+            try
+            {
+                string path = ScanPlanPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                List<string> lines = new List<string>();
+                foreach (ScanSegment s in _scanSegments)
+                    lines.Add(s.ToLine());
+                File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                Log("Tarama planı kaydedilemedi: " + ex.Message);
             }
         }
 
