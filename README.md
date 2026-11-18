@@ -8,6 +8,8 @@ Not: her kayıt için kendi adını yazabildiğin **Tanım** sütunu; Excel'den 
 Adresi olmayan (ilegal) kayıtlar okumayı bozmaz: hücre hatasıyla işaretlenir, geri kalan kayıtlar okunmaya devam eder.
 Şeffaf arka planlı bir simgesi vardır; masaüstü ve Başlat Menüsü kısayolları sağ tık menüsünden üretilir.
 **Tarama paneli**: kaydedilmiş çoklu aralıkları (ad, fonksiyon, başlangıç/bitiş, çözümleme) işaretleyip **TARA** ile tek seferde okuyun; sonuçlar ana tabloya segment başlıklarıyla eklenir, plan `%APPDATA%\ModbusScan\scanplan.txt` kalıcı.
+**Ayar kalıcılığı**: son girilen IP/port/ünite, COM/baud/parite, fonksiyon/adres/adet ve çözümleme seçimleri `%APPDATA%\ModbusScan\settings.txt` dosyasına kaydedilir; program yeniden açıldığında geri gelir.
+**EBM fan adresleme**: ebm-papst fanlar için ayrı panel — %25 start ile gözle teyit, ardından fan adresini (D100) ve ilgili registerları kaydedip işlemi bitirir.
 
 ## İndir
 
@@ -97,7 +99,7 @@ Kayıtların adını programın kendisi değil **sen** belirlersin: **Tanım** s
 
 ## Tarama paneli (çoklu aralık tarama)
 
-Okuma kutusunun altında **Tarama** grubu vardır (kayıtlı segment yoksa gizlidir). Burada istenen kadar segment tanımlanır:
+Okuma kutusunun altındaki **Tarama** düğmesi paneli açar/kapatır (kayıtlı segment varsa açılışta kendiliğinden görünür). Burada istenen kadar segment tanımlanır:
 
 - **✓** — segment tarama işaretli mi
 - **Ad** — kullanıcı görünen adı (örn. `Fan Set`, `Motor 1`)
@@ -111,6 +113,21 @@ Okuma kutusunun altında **Tarama** grubu vardır (kayıtlı segment yoksa gizli
 **Ekle** butonu mevcut bağlantı/okuma ayarlarından bir segment önerir; **Sil** seçili satırı kaldırır; plan `%APPDATA%\ModbusScan\scanplan.txt` dosyasına otomatik kaydedilir, program açılışında geri yüklenir.
 
 **TARA** butonu: bağlantı varken işaretli segmentleri sırayla okur (her segment kendi fonksiyon/adres/çözümleme ayarlarıyla). Sonuçlar ana tabloya eklenir; her segmentten önce **gri başlık satırı** (`--- Ad (FCxx baş..bit) ---`) konur, böylece nereden ne okundu belli olur. Hatalı kayıtlar diğer segmentleri engellemez (hata toleranslı okuma çalışır). Özet satır ve log'ta `Tarama tamamlandı: N / M kayıt` yazar.
+
+## Ayar kalıcılığı
+
+Son kullandığın bağlantı ve okuma ayarları kapanışta (ve her başarılı bağlantıda) `%APPDATA%\ModbusScan\settings.txt` dosyasına yazılır: TCP/RS485 modu, IP, port, ünite id, zaman aşımı, COM portu, baud/parite/durdurma, fonksiyon, adres, adet, çözümleme, kelime sırası ve 4xxxx gösterimi. Programı yeniden açtığında alanlar dolu gelir; sıfırlamak istersen dosyayı silmen yeterli.
+
+## EBM fan adresleme (ebm-papst)
+
+Okuma kutusunun altındaki **EBM Adresleme** düğmesi paneli açar. Akış, ebm-papst MODBUS dokümanındaki register haritasına göredir (adresler onluk PDU karşılıklarıyla):
+
+1. Panel açılınca mevcut fan adresi **D100** (256) okunur ve adres kutusuna yazılır.
+2. **%25 Start**: **D101** (257) = 1 (setpoint kaynağı RS485) ve **D001** (1) = 16000 (16000/64000 = %25) yazılır; fan dönmeye başlar. Anlık hız **D008** (8) okunup panele yazılır. Fanı **gözle kontrol et**.
+3. Dönüyorsa adres kutusuna yeni adresi (1..247) gir ve **Kaydet + Bitir**'e bas: **D100** = adres, **D00C** (12) = 0 (adresleme kapalı, adres kalıcılaşır), **D101** = 1, **D001** = 0 (fan durur). Adres geri okunarak doğrulanır; EBM register tanımları Tanım sütununa kaydedilir ve panel kapanır.
+4. **Geri Dön**: kaydetmeden çıkar; fanı durdurmak için D001 = 0 yazar.
+
+Notlar: EBM fanlar **RS485 (RTU)** üzerinden adreslenir; TCP modunda denenebilir ama gerçek fan beklenmez. Fanın EEPROM ömrü için D001'i sürekli yazmaktan kaçın (dokümanda ~100.000 yazma sınırı uyarısı vardır). EBM telegram sınırı nedeniyle okumalar tek register yapılır. **Yazma işlemleri yalnızca senin başlattığın bağlantıya gider**; testler sahte sunucuya karşı koşar.
 
 ## Hücreye çift tıkla → yaz
 
@@ -188,7 +205,7 @@ dist\Probe.exe --com COM3 --baud 9600 --parity N --stop 1 --unit 1 --fc 3 --addr
 powershell -ExecutionPolicy Bypass -File tools\GuiTest.ps1 -Port 5021
 ```
 
-> `GuiTest.ps1` tanımları **senin `%APPDATA%\ModbusScan\definitions.txt` dosyana yazmaz**: betik `MODBUSSCAN_DEFINITIONS` ortam değişkeniyle geçici bir dosyaya yönlendirir ve sonda gerçek dosyanın baytlarının değişmediğini ayrıca doğrular. Kısayol testleri de masaüstüne değil geçici klasöre yazar.
+> `GuiTest.ps1` tanımları, ayarları ve tarama planını **senin `%APPDATA%\ModbusScan\` dosyalarına yazmaz**: betik `MODBUSSCAN_DEFINITIONS` / `MODBUSSCAN_SETTINGS` / `MODBUSSCAN_SCANPLAN` ortam değişkenleriyle geçici dosyalara yönlendirir ve sonda gerçek dosyaların baytlarının değişmediğini ayrıca doğrular. Kısayol testleri de masaüstüne değil geçici klasöre yazar. EBM yazma testleri yalnızca sahte sunucuya karşı koşar.
 
 `GuiTest.ps1` 132 kontrolü doğrular: dört fonksiyon kodu, `uint16/int16/hex/float32/uint32` çözümleri, `ABCD/CDAB` kelime sırası, `4xxxx` ↔ PDU adres biçimi, adet sınırı olmadığı (300 register 3 istek, 125 register tek istek, `0` adet ve adres taşması reddi), Modbus exception yanıtı (tek adreslik okumada bile satırın `ilegal hata 02` olarak işaretlenmesi), bağlantı kurulamayan durum, hata toleransı (yasadisi 400/401/450 kayıtlarının işaretlenip 200 satırlık aralığın tam dolması, yalnızca üç kaydın hatalı sayılması, hatasız satırların değer göstermesi, özet ve logda hata adedi, hatalı hücrenin rengi ve ipucu, hatalı satırdan yazma penceresinin açılması, hiçbir satıra cevap vermeyen aralıkta okumanın `Üst üste 5 kayıt` gerekçesiyle durması, bağlantının kapanmaması ve sonraki okumanın çalışması), yazma penceresi (çift tıkla açılış, adres ve bayt önizleme, FC06/FC16/FC05 yazma + geri okuma, tablonun tazelenmesi, geçersiz değer ve salt okunur alanda pasif **Yaz**), tanım sütunu (hücreye yazma, Excel biçimli metinden satır satır yapıştırma, çok sütunlu kopyada ilk alan, seçili satırdan başlama, taşan satırların loglanması, okuma tekrarında korunma, dosyaya yazılma ve yeni pencerede geri yüklenme, Delete tuşu ve sağ tık ile tek satır temizleme, toplu temizlemenin onay sonrası hem tabloyu hem dosyayı boşaltması, yazı yokken menü seçeneklerinin pasif kalması), boyutlandırma (Sizable kenarlık, Buyut kutusu, varsayılan 500×600 içerik, küçültme sınırının 500 px içeriğe inmesi, sütunların sürüklenebilir olması ve `Fill` Tanım sütunu, büyütünce tablonun uzayıp genişlemesi, logun alta yapışması, sağ butonların etikete/kenara taşmaması, büyütülmüş pencerede 200 kayıtlık parçalı okuma, ilerleme geri çağrısının okuma sonunda temizlenmesi), RS485 modu (TCP'de IP/Port görünür ve COM gizli, RS485'te alanlar yer değiştirir, kutuya sığar, `9600/Yok/1` varsayılanları ve parite/durdurma enum eşlemesi, sistem COM listesiyle aynı liste, listenin owner-draw olması ve yalnızca sade port adlarını saklaması, açılır liste genişliğinin kutudan dar olmaması, açıklamaların sadece mevcut portlara yazılmış olması, port seçilmeden bağlanmanın reddi, TCP'ye dönüşte test sunucusuna bağlantı, bağlıyken mod seçiminin kilitlenmesi), güncelleme şeridi (yeşil "yeni sürüm" + aktif Güncelle, asset yoksa "Sayfayı aç", güncelse pasif buton, denetim hatası, şerit/tablo yerleşimi) ve simge/kısayol (`.ico` başlığının geçerli ve çok boyutlu olması, pencere simgesinin exe'den gelmesi, sağ tık menüsünün iki seçeneği, özet satırının aynı menüye bağlı olması, kısayolların hedef/simge/çalışma klasörü/açıklama alanları, kaldırınca iki dosyanın silinmesi ve tekrar çağrıda sessiz kalması, geçici klasör hedefinin ayrıştırılması, kullanıcının `%APPDATA%` tanım dosyasının test boyunca bayt bayt aynı kalması).
 
@@ -211,7 +228,7 @@ Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi 
 | `src/ModbusRtu.cs` | RS485/seri taşıması: SerialPort açma, COM listesi ve `Win32_PnPEntity` sürücü açıklamaları, `birim id + PDU + CRC16` çerçeveleme, yanıt uzunluğunu byte count'tan çözme, zaman aşımı ve yarım çerçeve temizliği |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
 | `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) — TCP/RS485 ayrımı yoktur, ortak istemciyi kullanır |
-| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, **Tarama paneli** (kaydedilmiş çoklu aralıkları tek tıkla oku), log alanı |
+| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, **Tarama paneli** (kaydedilmiş çoklu aralıkları tek tıkla oku), **EBM fan adresleme** paneli (%25 start teyidi + D100 adres kaydı), `settings.txt` ayar kalıcılığı, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
 | `tools/SelfTest.cs` | Loopback soket + sahte seri akış ile çerçeve/protokol seviyesinde kendi kendine test (CI bunu koşar) |
 | `tools/Probe.cs` | Konsol okuma aracı (`--ip/--port` veya `--com/--baud/--parity/--stop`, `--list-ports`, `--tolerant`) |

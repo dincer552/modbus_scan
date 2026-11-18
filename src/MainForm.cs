@@ -82,13 +82,111 @@ namespace ModbusScan
         }
         private readonly List<ScanSegment> _scanSegments = new List<ScanSegment>();
 
+        // EBM fan adresleme
+        private GroupBox gbEbm;
+        private Button btnScanToggle;
+        private Button btnEbmEnter, btnEbmBack, btnEbmStart25, btnEbmSaveAddr;
+        private TextBox txtEbmStatus, txtEbmFoundAddr;
+        private Label lblEbmAddr;
+
+        // Ayar kalıcılığı
+        private static string SettingsPath()
+        {
+            string over = Environment.GetEnvironmentVariable("MODBUSSCAN_SETTINGS");
+            if (over != null && over.Trim().Length > 0) return over;
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ModbusScan");
+            return Path.Combine(dir, "settings.txt");
+        }
+
+        private void LoadSettings()
+        {
+            try
+            {
+                string path = SettingsPath();
+                if (!File.Exists(path)) return;
+                string[] lines = File.ReadAllLines(path, new UTF8Encoding(false));
+                foreach (string line in lines)
+                {
+                    string[] parts = line.Split(new char[] { '=' }, 2);
+                    if (parts.Length != 2) continue;
+                    string key = parts[0].Trim();
+                    string val = parts[1].Trim();
+                    switch (key)
+                    {
+                        case "mode": cmbMode.SelectedIndex = val == "RS485" ? 1 : 0; break;
+                        case "ip": txtIp.Text = val; break;
+                        case "port": txtPort.Text = val; break;
+                        case "unit": txtUnit.Text = val; break;
+                        case "timeout": txtTimeout.Text = val; break;
+                        case "com": SetComboByText(cmbSerialPort, val); break;
+                        case "baud": SetComboByText(cmbBaud, val); break;
+                        case "parity": SetComboByText(cmbParity, val); break;
+                        case "stop": SetComboByText(cmbStop, val); break;
+                        case "function": SetComboByText(cmbFunction, val); break;
+                        case "address": txtAddress.Text = val; break;
+                        case "quantity": txtQuantity.Text = val; break;
+                        case "decode": SetComboByText(cmbDecode, val); break;
+                        case "wordorder": SetComboByText(cmbWordOrder, val); break;
+                        case "convention": chkConvention.Checked = val == "1"; break;
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+
+        private static void SetComboByText(ComboBox cmb, string val)
+        {
+            for (int i = 0; i < cmb.Items.Count; i++)
+            {
+                if (string.Equals(Convert.ToString(cmb.Items[i]), val, StringComparison.OrdinalIgnoreCase))
+                {
+                    cmb.SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                string path = SettingsPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                List<string> lines = new List<string>
+                {
+                    "mode=" + (SelectedIsRtu() ? "RS485" : "TCP"),
+                    "ip=" + txtIp.Text.Trim(),
+                    "port=" + txtPort.Text.Trim(),
+                    "unit=" + txtUnit.Text.Trim(),
+                    "timeout=" + txtTimeout.Text.Trim(),
+                    "com=" + cmbSerialPort.Text.Trim(),
+                    "baud=" + cmbBaud.Text.Trim(),
+                    "parity=" + cmbParity.Text.Trim(),
+                    "stop=" + cmbStop.Text.Trim(),
+                    "function=" + cmbFunction.Text.Trim(),
+                    "address=" + txtAddress.Text.Trim(),
+                    "quantity=" + txtQuantity.Text.Trim(),
+                    "decode=" + cmbDecode.Text.Trim(),
+                    "wordorder=" + cmbWordOrder.Text.Trim(),
+                    "convention=" + (chkConvention.Checked ? "1" : "0")
+                };
+                File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                Log("Ayarlar kaydedilemedi: " + ex.Message);
+            }
+        }
+
         public MainForm()
         {
             BuildUi();
             LoadDefinitions();
             LoadScanPlan();
+            LoadSettings();
             ApplyMode();
             UpdateConnectionState(false);
+            RelayoutPanels();
         }
 
         private ModbusClient Client
@@ -291,26 +389,26 @@ namespace ModbusScan
             cmbWordOrder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
             lblUpdate = new Label();
-            lblUpdate.SetBounds(8, 201, 296, 16);
+            lblUpdate.SetBounds(8, 229, 296, 16);
             lblUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             lblUpdate.Text = "Güncelleme: henüz denetlenmedi";
             lblUpdate.ForeColor = Color.Gray;
 
             btnCheckUpdate = new Button();
             btnCheckUpdate.Text = "Denetle";
-            btnCheckUpdate.SetBounds(310, 196, 82, 25);
+            btnCheckUpdate.SetBounds(310, 224, 82, 25);
             btnCheckUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnCheckUpdate.Click += OnCheckUpdate;
 
             btnUpdate = new Button();
             btnUpdate.Text = "Güncelle";
-            btnUpdate.SetBounds(396, 196, 96, 25);
+            btnUpdate.SetBounds(396, 224, 96, 25);
             btnUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnUpdate.Enabled = false;
             btnUpdate.Click += OnInstallUpdate;
 
             grid = new DefinitionGrid();
-            grid.SetBounds(8, 226, 484, 246);
+            grid.SetBounds(8, 254, 484, 218);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -343,8 +441,19 @@ namespace ModbusScan
             _definitionMenu.Opening += OnDefinitionMenuOpening;
             grid.ContextMenuStrip = _definitionMenu;
 
+            btnScanToggle = new Button();
+            btnScanToggle.Text = "Tarama";
+            btnScanToggle.SetBounds(8, 196, 90, 23);
+            btnScanToggle.Click += OnScanToggle;
+
+            btnEbmEnter = new Button();
+            btnEbmEnter.Text = "EBM Adresleme";
+            btnEbmEnter.SetBounds(104, 196, 110, 23);
+            btnEbmEnter.Click += OnEbmEnter;
+
             BuildAppMenu();
             BuildScanUi();
+            BuildEbmUi();
 
             txtLog = new TextBox();
             txtLog.SetBounds(8, 502, 484, 90);
@@ -357,7 +466,10 @@ namespace ModbusScan
 
             Controls.Add(gbConnection);
             Controls.Add(gbRead);
+            Controls.Add(btnScanToggle);
+            Controls.Add(btnEbmEnter);
             Controls.Add(gbScan);
+            Controls.Add(gbEbm);
             Controls.Add(lblUpdate);
             Controls.Add(btnCheckUpdate);
             Controls.Add(btnUpdate);
@@ -405,7 +517,7 @@ namespace ModbusScan
         {
             gbScan = new GroupBox();
             gbScan.Text = "Tarama";
-            gbScan.SetBounds(8, 196, 484, 28);
+            gbScan.SetBounds(8, 224, 484, 28);
             gbScan.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbScan.Visible = false;
 
@@ -413,6 +525,7 @@ namespace ModbusScan
             scanGrid = new DataGridView();
             scanGrid.SetBounds(6, 18, 380, 160);
             scanGrid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            scanGrid.VirtualMode = true;
             scanGrid.AllowUserToAddRows = false;
             scanGrid.AllowUserToDeleteRows = false;
             scanGrid.AllowUserToResizeRows = false;
@@ -461,6 +574,224 @@ namespace ModbusScan
             gbScan.Controls.Add(btnScanAdd);
             gbScan.Controls.Add(btnScanRemove);
             gbScan.Controls.Add(btnScanRun);
+        }
+
+        /// <summary>EBM-papst fan adresleme paneli: %25 start teyidi + adres kaydı (RTU, D100/D001/D101/D00C).</summary>
+        private void BuildEbmUi()
+        {
+            gbEbm = new GroupBox();
+            gbEbm.Text = "EBM Fan Adresleme";
+            gbEbm.SetBounds(8, 224, 484, 118);
+            gbEbm.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            gbEbm.Visible = false;
+
+            lblEbmAddr = MakeLabel("Adres (1..247)", 10, 24);
+            gbEbm.Controls.Add(lblEbmAddr);
+
+            txtEbmFoundAddr = MakeTextBox("1", 96, 20, 44);
+            gbEbm.Controls.Add(txtEbmFoundAddr);
+
+            btnEbmStart25 = new Button();
+            btnEbmStart25.Text = "%25 Start";
+            btnEbmStart25.SetBounds(150, 19, 90, 25);
+            btnEbmStart25.Click += OnEbmStart25;
+            gbEbm.Controls.Add(btnEbmStart25);
+
+            btnEbmSaveAddr = new Button();
+            btnEbmSaveAddr.Text = "Kaydet + Bitir";
+            btnEbmSaveAddr.SetBounds(246, 19, 110, 25);
+            btnEbmSaveAddr.BackColor = Color.FromArgb(0, 128, 0);
+            btnEbmSaveAddr.ForeColor = Color.White;
+            btnEbmSaveAddr.Click += OnEbmSaveAddr;
+            gbEbm.Controls.Add(btnEbmSaveAddr);
+
+            btnEbmBack = new Button();
+            btnEbmBack.Text = "Geri Dön";
+            btnEbmBack.SetBounds(362, 19, 110, 25);
+            btnEbmBack.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnEbmBack.Click += OnEbmBack;
+            gbEbm.Controls.Add(btnEbmBack);
+
+            txtEbmStatus = new TextBox();
+            txtEbmStatus.SetBounds(10, 50, 462, 58);
+            txtEbmStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtEbmStatus.Multiline = true;
+            txtEbmStatus.ReadOnly = true;
+            txtEbmStatus.ScrollBars = ScrollBars.Vertical;
+            txtEbmStatus.BackColor = Color.White;
+            txtEbmStatus.Font = new Font("Consolas", 8.25f);
+            gbEbm.Controls.Add(txtEbmStatus);
+        }
+
+        private void EbmStatus(string msg)
+        {
+            txtEbmStatus.AppendText(msg + Environment.NewLine);
+        }
+
+        private int EbmTimeoutMs()
+        {
+            int t;
+            if (!int.TryParse(txtTimeout.Text.Trim(), out t) || t < 100) t = 2000;
+            return t;
+        }
+
+        private void OnScanToggle(object sender, EventArgs e)
+        {
+            gbScan.Visible = !gbScan.Visible;
+            if (gbScan.Visible)
+            {
+                gbEbm.Visible = false;
+                UpdateScanPanelSize();
+            }
+            RelayoutPanels();
+        }
+
+        private void UpdateScanPanelSize()
+        {
+            int rows = Math.Max(1, Math.Min(_scanSegments.Count, 6));
+            int gridH = 23 + rows * 22;
+            scanGrid.Height = gridH;
+            gbScan.Height = gridH + 26;
+        }
+
+        /// <summary>Tarama/EBM paneli açıkken güncelleme şeridini ve tabloyu aşağı kaydırır; çakışmayı önler.</summary>
+        private void RelayoutPanels()
+        {
+            int off = 0;
+            if (gbEbm != null && gbEbm.Visible) off = gbEbm.Height + 4;
+            else if (gbScan != null && gbScan.Visible) off = gbScan.Height + 4;
+
+            lblUpdate.Top = 229 + off;
+            btnCheckUpdate.Top = 224 + off;
+            btnUpdate.Top = 224 + off;
+            grid.Top = 254 + off;
+            grid.Height = Math.Max(60, 472 - grid.Top);
+
+            int minH = 430 + off;
+            if (MinimumSize.Height != minH)
+            {
+                MinimumSize = new Size(MinimumSize.Width, minH);
+                if (ClientSize.Height < minH) ClientSize = new Size(ClientSize.Width, minH);
+            }
+        }
+
+        private void OnEbmEnter(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected)
+            {
+                Log("EBM adresleme için önce cihaza bağlanın.");
+                return;
+            }
+            if (!SelectedIsRtu())
+                Log("Not: EBM fanlar RS485 (RTU) üzerinden adreslenir; TCP modunda devam ediliyor.");
+
+            gbScan.Visible = false;
+            gbEbm.Visible = true;
+            RelayoutPanels();
+            txtEbmStatus.Clear();
+
+            int timeoutMs = EbmTimeoutMs();
+            try
+            {
+                RegisterRead r = Client.ReadTolerant(3, 256, 1, timeoutMs);
+                if (r != null && r.Quantity >= 1 && !r.Failed(0))
+                {
+                    int cur = (r.Data[0] << 8) | r.Data[1];
+                    txtEbmFoundAddr.Text = cur.ToString();
+                    EbmStatus("Mevcut fan adresi (D100): " + cur);
+                }
+                else
+                {
+                    EbmStatus("Mevcut adres okunamadı (D100). Yeni adresi elle girin.");
+                }
+            }
+            catch (Exception ex)
+            {
+                EbmStatus("Adres okuma hatası: " + ex.Message);
+            }
+            EbmStatus("Akış: yeni adresi gir → %25 Start ile fanı döndürüp gözle teyit et → Kaydet + Bitir.");
+        }
+
+        private void OnEbmStart25(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected) { EbmStatus("Bağlantı yok."); return; }
+            int timeoutMs = EbmTimeoutMs();
+            try
+            {
+                Client.WriteSingleRegister(257, 1, timeoutMs);      // D101: setpoint kaynağı = RS485
+                Client.WriteSingleRegister(1, 16000, timeoutMs);    // D001: 16000/64000 = %25
+                EbmStatus("D101=1 (RS485), D001=16000 (%25 start). Fan dönmeye başlamalı.");
+                EbmStatus("Gözle kontrol edin: dönüyorsa adresi girip Kaydet + Bitir'e basın.");
+                try
+                {
+                    RegisterRead r = Client.ReadTolerant(3, 8, 1, timeoutMs);
+                    if (r != null && r.Quantity >= 1 && !r.Failed(0))
+                        EbmStatus("Anlık hız (D008): " + ((r.Data[0] << 8) | r.Data[1]) + " rpm");
+                }
+                catch (Exception) { }
+            }
+            catch (Exception ex)
+            {
+                EbmStatus("Start hatası: " + ex.Message);
+            }
+        }
+
+        private void OnEbmSaveAddr(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected) { EbmStatus("Bağlantı yok."); return; }
+            int addr;
+            if (!int.TryParse(txtEbmFoundAddr.Text.Trim(), out addr) || addr < 1 || addr > 247)
+            {
+                EbmStatus("Geçersiz adres: 1..247 arası olmalı.");
+                return;
+            }
+            int timeoutMs = EbmTimeoutMs();
+            try
+            {
+                Client.WriteSingleRegister(256, addr, timeoutMs);   // D100: fan adresi
+                Client.WriteSingleRegister(12, 0, timeoutMs);       // D00C: adresleme kapalı (adres D100'e işlenir)
+                Client.WriteSingleRegister(257, 1, timeoutMs);      // D101: kaynak RS485
+                Client.WriteSingleRegister(1, 0, timeoutMs);        // D001: fan durdur
+
+                RegisterRead r = Client.ReadTolerant(3, 256, 1, timeoutMs);
+                if (r != null && r.Quantity >= 1 && !r.Failed(0))
+                {
+                    int back = (r.Data[0] << 8) | r.Data[1];
+                    if (back != addr)
+                    {
+                        EbmStatus("Doğrulama başarısız: D100=" + back + ", beklenen " + addr + ". Kaydedilmedi.");
+                        return;
+                    }
+                }
+
+                StoreDefinition(3, 256, "EBM fan adresi (D100)");
+                StoreDefinition(3, 1, "EBM setpoint (D001) 0..64000, %25=16000");
+                StoreDefinition(3, 257, "EBM setpoint kaynağı (D101) 1=RS485");
+                StoreDefinition(3, 12, "EBM adresleme aç/kapa (D00C)");
+                StoreDefinition(3, 8, "EBM anlık hız (D008) rpm");
+                SaveDefinitions();
+
+                EbmStatus("Kaydedildi: fan adresi " + addr + ". Fan durduruldu (D001=0), tanımlar kaydedildi.");
+                Log("EBM fan adresleme tamamlandı: adres " + addr);
+                gbEbm.Visible = false;
+                RelayoutPanels();
+            }
+            catch (Exception ex)
+            {
+                EbmStatus("Kaydetme hatası: " + ex.Message);
+            }
+        }
+
+        private void OnEbmBack(object sender, EventArgs e)
+        {
+            if (Client != null && Client.IsConnected)
+            {
+                try { Client.WriteSingleRegister(1, 0, EbmTimeoutMs()); }
+                catch (Exception) { }
+            }
+            gbEbm.Visible = false;
+            RelayoutPanels();
+            Log("EBM adresleme modundan çıkıldı.");
         }
 
         private void ScanGrid_CellValueNeeded(object sender, DataGridViewCellValueEventArgs e)
@@ -573,8 +904,9 @@ namespace ModbusScan
             s.Enabled = true;
             s.Name = "Segment" + (_scanSegments.Count + 1);
             s.Function = SelectedFunction();
-            s.StartAddress = 0;
-            s.Quantity = 10;
+            int sa, qt;
+            s.StartAddress = int.TryParse(txtAddress.Text.Trim(), out sa) && sa >= 0 ? sa : 0;
+            s.Quantity = int.TryParse(txtQuantity.Text.Trim(), out qt) && qt >= 1 ? qt : 10;
             s.DecodeIndex = cmbDecode.SelectedIndex;
             s.WordOrderIndex = cmbWordOrder.SelectedIndex;
             s.Show4xx = chkConvention.Checked;
@@ -582,6 +914,7 @@ namespace ModbusScan
             scanGrid.RowCount = _scanSegments.Count;
             scanGrid.Invalidate();
             SaveScanPlan();
+            if (gbScan.Visible) { UpdateScanPanelSize(); RelayoutPanels(); }
         }
 
         private void OnScanRemove(object sender, EventArgs e)
@@ -593,6 +926,7 @@ namespace ModbusScan
             scanGrid.RowCount = _scanSegments.Count;
             scanGrid.Invalidate();
             SaveScanPlan();
+            if (gbScan.Visible) { UpdateScanPanelSize(); RelayoutPanels(); }
         }
 
         private void OnScanRun(object sender, EventArgs e)
@@ -620,7 +954,6 @@ namespace ModbusScan
 
             System.Threading.Thread worker = new System.Threading.Thread(delegate()
             {
-                int totalDone = 0;
                 int totalExpected = 0;
                 foreach (ScanSegment s in _scanSegments)
                     if (s.Enabled) totalExpected += s.Quantity;
@@ -1152,6 +1485,7 @@ namespace ModbusScan
                 int ms = (int)(DateTime.Now - t0).TotalMilliseconds;
                 Log("Bağlandı (" + (rtu ? "RS485" : "TCP") + "): " + Client.Description + " (unit " + unit + ") " + ms + " ms");
                 UpdateConnectionState(true);
+                SaveSettings();
             }
             catch (Exception ex)
             {
@@ -1648,7 +1982,7 @@ namespace ModbusScan
                 if (_scanSegments.Count > 0 && gbScan != null)
                 {
                     gbScan.Visible = true;
-                    gbScan.Height = Math.Max(28, 28 + Math.Min(_scanSegments.Count, 6) * 22 + 10);
+                    UpdateScanPanelSize();
                 }
             }
             catch (Exception)
@@ -1857,6 +2191,7 @@ namespace ModbusScan
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            SaveSettings();
             if (updateTimer != null) updateTimer.Stop();
             if (firstCheckTimer != null) firstCheckTimer.Stop();
             _tcp.Close();

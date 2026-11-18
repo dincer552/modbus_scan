@@ -32,6 +32,13 @@ function Invoke-Method($Form, [string]$Name, $Arguments) {
     $method.Invoke($Form, $Arguments) | Out-Null
 }
 
+function Close-Form($Form) {
+    # Gosterilmeyen formda Close() FormClosing tetiklenmez; baglanti acik kalirsa sahte sunucu
+    # eski istemcide bloklanir ve sonraki testlerin istekleri zaman asimina ugrar. Once kes.
+    Invoke-Handler $Form 'OnDisconnect'
+    $Form.Close()
+}
+
 function Get-GridRows($Form) {
     $grid = Get-Field $Form 'grid'
     $rows = @()
@@ -126,15 +133,23 @@ function Dialog-Write {
 
 $fail = 0
 
-# Kullanicinin tanim dosyasina HIC dokunulmaz: MODBUSSCAN_DEFINITIONS ile testler gecici bir
-# dosyaya yonlendirilir. (Yedekle-geri yukle yaklasimi, yarida kalan bir calismada kullanici
-# kayitlarini bosaltabildiği icin birakildi.)
+# Kullanicinin tanim/ayar/tarama dosyalarina HIC dokunulmaz: MODBUSSCAN_* ortam degiskenleriyle
+# testler gecici dosyalara yonlendirilir. (Yedekle-geri yukle yaklasimi, yarida kalan bir calismada
+# kullanici kayitlarini bosaltabildiği icin birakildi.)
 $defDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'mscan-defs-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 [System.IO.Directory]::CreateDirectory($defDir) | Out-Null
 $defPath = [System.IO.Path]::Combine($defDir, 'definitions.txt')
 $env:MODBUSSCAN_DEFINITIONS = $defPath
+$settingsPath = [System.IO.Path]::Combine($defDir, 'settings.txt')
+$env:MODBUSSCAN_SETTINGS = $settingsPath
+$scanPlanPath = [System.IO.Path]::Combine($defDir, 'scanplan.txt')
+$env:MODBUSSCAN_SCANPLAN = $scanPlanPath
 $userDefPath = [System.IO.Path]::Combine($env:APPDATA, 'ModbusScan', 'definitions.txt')
 $userDefBefore = if (Test-Path $userDefPath) { [System.IO.File]::ReadAllBytes($userDefPath) } else { $null }
+$userSettingsPath = [System.IO.Path]::Combine($env:APPDATA, 'ModbusScan', 'settings.txt')
+$userSettingsBefore = if (Test-Path $userSettingsPath) { [System.IO.File]::ReadAllBytes($userSettingsPath) } else { $null }
+$userScanPlanPath = [System.IO.Path]::Combine($env:APPDATA, 'ModbusScan', 'scanplan.txt')
+$userScanPlanBefore = if (Test-Path $userScanPlanPath) { [System.IO.File]::ReadAllBytes($userScanPlanPath) } else { $null }
 
 # Beklenmeyen hata: gecici klasor temizlenir, kullanici dosyasi yine de kontrol edilir.
 trap {
@@ -285,7 +300,7 @@ Assert ($d['Onizleme'] -like 'FC05 @0*KAPALI*') 'coil FC05 onizleme' $d['Onizlem
 Assert ($d['Sonuc'] -like 'OK*Geri okundu: KAPALI (0)*') 'coil yazma + geri okuma' $d['Sonuc']
 Assert (@($d['SonrakiSatirlar'][0] -split '\|')[2].Trim() -eq '0') 'coil sonrasi tablo 0 gosteriyor' $d['SonrakiSatirlar'][0]
 
-$d = Dialog-Write -Form $form -Function 0 -Addr 20 -Qty 1 -Row 0 -TypeIndex 0 -Value '5'
+$d = Dialog-Write -Form $form -Function 0 -Addr 9000 -Qty 1 -Row 0 -TypeIndex 0 -Value '5'
 Assert ($d['Sonuc'] -like 'HATA*hata kodu 02*') 'hata yaniti dialogda goruntulendi' $d['Sonuc']
 
 $d = Dialog-Write -Form $form -Function 0 -Addr 3 -Qty 1 -Row 0 -TypeIndex 0 -Value '70000'
@@ -420,19 +435,21 @@ Assert ($szGrid.Columns['colDef'].Width -ge 10) 'Tanim sutunu cok daraltildigind
     ([string]$szGrid.Columns['colDef'].Width)
 $form.Hide()
 
-$form.Close()
+Close-Form $form
 
 $restored = [Activator]::CreateInstance($type)
 (Get-Field $restored 'txtIp').Text = '127.0.0.1'
 (Get-Field $restored 'txtPort').Text = "$Port"
 (Get-Field $restored 'txtUnit').Text = '1'
 (Get-Field $restored 'txtTimeout').Text = '2000'
+(Get-Field $restored 'txtAddress').Text = '0'
+(Get-Field $restored 'txtQuantity').Text = '10'
 Invoke-Handler $restored 'OnConnect'
 Invoke-Handler $restored 'OnRead'
 $rows = @(Get-GridRows $restored)
 Assert (@($rows[0] -split '\|')[3].Trim() -eq 'satir 1') 'tanim yeni pencerede dosyadan geri yuklendi' `
     (($rows[0] + ' / durum=' + [string](Get-Field $restored 'lblStatus').Text))
-$restored.Close()
+Close-Form $restored
 
 # --- Guncelleme seridi: durum makinesi yansitmaya dogrudan surulur (aga gidilmez) ---
 function New-UpdateInfo([string]$Tag, [bool]$Newer, [bool]$Asset, [long]$Size) {
@@ -521,7 +538,7 @@ if ($maxRight -le 492 -and ($gridRect.Y - $maxStripBottom) -ge 4 -and $gridRect.
     Write-Host ("KALDI  duzen: sag={0} seritAlt={1} tabloUst={2} tabloAlt={3}" -f $maxRight, $maxStripBottom, $gridRect.Y, $gridRect.Bottom)
 }
 
-$ui.Close()
+Close-Form $ui
 
 function Invoke-Value($Form, [string]$Name) {
     # Paramsiz private metot (SelectedParity, SelectedStopBits) cagrisinin donus degerini alir.
@@ -609,7 +626,7 @@ Assert (-not [bool](Get-Field $serial 'cmbMode').Enabled) 'bagliyken TCP/RS485 s
 Invoke-Handler $serial 'OnDisconnect'
 Assert ([bool](Get-Field $serial 'cmbMode').Enabled -and [bool](Get-Field $serial 'btnConnect').Enabled `
         -and -not [bool](Get-Field $serial 'btnRead').Enabled) 'kestikten sonra mod secimi ve baglan acik' 'durumlar yanlis'
-$serial.Close()
+Close-Form $serial
 
 # --- Tanim sutununu temizleme: Delete tusu, satir menuyu ve toplu temizlik ---
 $clear = [Activator]::CreateInstance($type)
@@ -670,7 +687,7 @@ Assert ($fileText -notlike "*3`t2`t*") 'toplu temizlik dosyaya da yansidi' (($fi
 Invoke-Method $clear 'OnDefinitionMenuOpening' @($null, [Activator]::CreateInstance([System.ComponentModel.CancelEventArgs]))
 Assert (-not $menu.Items[0].Enabled -and -not $menu.Items[1].Enabled) 'sutun bosken secenekler pasif' `
     ('satir=' + $menu.Items[0].Enabled + ' butun=' + $menu.Items[1].Enabled)
-$clear.Close()
+Close-Form $clear
 
 # --- Simge (ikon) ve kisayol menuyu ---
 # Kisayollar KULLANICININ MASASTUSUNE YAZILMAZ: gecici klasore yazilip silinir.
@@ -734,7 +751,7 @@ $tmpReal = [System.IO.Path]::Combine($tmpRoot, 'mscan-real-' + $salt + '.exe')
 $isTemp = [bool](Invoke-Static 'IsTemporaryLocation' @([string]$tmpReal))
 $isRepo = [bool](Invoke-Static 'IsTemporaryLocation' @([string]$exePath))
 Assert ($isTemp -and -not $isRepo) 'gecici klasor hedefi ayirdediliyor' ("temp=$isTemp depo=$isRepo")
-$iconForm.Close()
+Close-Form $iconForm
 
 if (-not $SkipOfflineCheck) {
     $offline = [Activator]::CreateInstance($type)
@@ -751,16 +768,166 @@ if (-not $SkipOfflineCheck) {
         $fail++
         Write-Host "KALDI  baglanti yok senaryosu: $log / bas=$canRetry oku=$readEnabled"
     }
-    $offline.Close()
+    Close-Form $offline
 }
 
-# Kullanicinin kendi tanim dosyasina dokunulmadigini dogrula ve gecici klasoru topla.
+# --- Tarama paneli: ac/kapa, segment ekleme, kalicilik ve TARA ---
+function Read-Reg($Form, [int]$Addr) {
+    # Sahte sunucudan tek register okur (EBM yazmalarini dogrulamak icin).
+    $tcp = Get-Field $Form '_tcp'
+    $m = $tcp.GetType().GetMethod('ReadTolerant')
+    $r = $m.Invoke($tcp, @([byte]3, $Addr, 1, 2000))
+    if ($null -eq $r -or $r.Failed(0)) { return -1 }
+    return ([int]$r.Data[0] -shl 8) -bor [int]$r.Data[1]
+}
+
+$scan = [Activator]::CreateInstance($type)
+$scan.Show()
+(Get-Field $scan 'txtIp').Text = '127.0.0.1'
+(Get-Field $scan 'txtPort').Text = "$Port"
+(Get-Field $scan 'txtUnit').Text = '1'
+(Get-Field $scan 'txtTimeout').Text = '2000'
+Invoke-Handler $scan 'OnConnect'
+(Get-Field $scan 'txtAddress').Text = '0'
+(Get-Field $scan 'txtQuantity').Text = '5'
+Set-Combo $scan 'cmbFunction' 0
+
+Assert (-not (Visible $scan 'gbScan')) 'tarama paneli varsayilan olarak gizli' 'gorunur'
+Invoke-Handler $scan 'OnScanToggle'
+Assert ((Visible $scan 'gbScan')) 'Tarama dugmesi paneli aciyor' 'gizli kaldi'
+Invoke-Handler $scan 'OnScanAdd'
+$sg = Get-Field $scan 'scanGrid'
+Assert ($sg.RowCount -eq 1) 'segment eklendi' ([string]$sg.RowCount)
+Assert ([string]$sg.Rows[0].Cells['scStart'].Value -eq '0' -and [string]$sg.Rows[0].Cells['scQty'].Value -eq '5') `
+    'segment, okuma alanlarindaki adres/adet ile olusuyor' `
+    ('start=' + $sg.Rows[0].Cells['scStart'].Value + ' qty=' + $sg.Rows[0].Cells['scQty'].Value)
+Assert ((Test-Path $scanPlanPath)) 'tarama plani dosyaya yazildi' 'dosya yok'
+Assert ((Get-Field $scan 'grid').Top -gt (Get-Field $scan 'gbScan').Bottom -and
+        (Get-Field $scan 'lblUpdate').Top -gt (Get-Field $scan 'gbScan').Bottom) `
+    'panel acikken serit ve tablo asagi kayiyor, cakisma yok' `
+    ('panelAlt=' + (Get-Field $scan 'gbScan').Bottom + ' tabloUst=' + (Get-Field $scan 'grid').Top)
+
+Invoke-Handler $scan 'OnScanRun'
+$waited = 0
+while (-not (Get-Field $scan 'btnScanRun').Enabled -and $waited -lt 10000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 50
+    $waited += 50
+}
+$scanRows = @(Get-GridRows $scan)
+Assert ($scanRows.Count -eq 6 -and $scanRows[0] -like '*--- Segment1*') `
+    'TARA: baslik satiri + 5 kayit ana tabloya yazildi' ('satir=' + $scanRows.Count + ' ilk=' + $scanRows[0])
+
+$scan2 = [Activator]::CreateInstance($type)
+$scan2.Show()
+Assert ((Visible $scan2 'gbScan') -and (Get-Field $scan2 'scanGrid').RowCount -eq 1) `
+    'tarama plani yeni pencerede dosyadan geri yuklendi' 'panel/segment yok'
+Close-Form $scan2
+
+Invoke-Handler $scan 'OnScanToggle'
+Assert (-not (Visible $scan 'gbScan') -and (Get-Field $scan 'grid').Top -eq 254) `
+    'panel kapaninca duzen eski haline donuyor' ('tabloUst=' + (Get-Field $scan 'grid').Top)
+Close-Form $scan
+
+# --- EBM fan adresleme: %25 start, adres kaydi, geri donus (yalnizca sahte sunucuya yazilir) ---
+$ebm = [Activator]::CreateInstance($type)
+$ebm.Show()
+(Get-Field $ebm 'txtIp').Text = '127.0.0.1'
+(Get-Field $ebm 'txtPort').Text = "$Port"
+(Get-Field $ebm 'txtUnit').Text = '1'
+(Get-Field $ebm 'txtTimeout').Text = '2000'
+Invoke-Handler $ebm 'OnConnect'
+
+Invoke-Handler $ebm 'OnEbmEnter'
+Assert ((Visible $ebm 'gbEbm') -and -not (Visible $ebm 'gbScan')) 'EBM paneli aciliyor, tarama paneli gizleniyor' 'gorunurluk yanlis'
+Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*D100*') 'mevcut adres D100 den okunup raporlaniyor' `
+    ([string](Get-Field $ebm 'txtEbmStatus').Text)
+
+(Get-Field $ebm 'txtEbmFoundAddr').Text = '300'
+Invoke-Handler $ebm 'OnEbmSaveAddr'
+Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*1..247*' -and (Visible $ebm 'gbEbm')) `
+    'gecersiz adres (300) reddediliyor, panel acik kaliyor' ([string](Get-Field $ebm 'txtEbmStatus').Text)
+
+(Get-Field $ebm 'txtEbmFoundAddr').Text = '42'
+Invoke-Handler $ebm 'OnEbmStart25'
+Assert ((Read-Reg $ebm 1) -eq 16000 -and (Read-Reg $ebm 257) -eq 1) `
+    '%25 start: D001=16000 ve D101=1 yazildi' `
+    ('D001=' + (Read-Reg $ebm 1) + ' D101=' + (Read-Reg $ebm 257) + ' durum=' + [string](Get-Field $ebm 'txtEbmStatus').Text)
+
+Invoke-Handler $ebm 'OnEbmSaveAddr'
+Assert ((Read-Reg $ebm 256) -eq 42 -and (Read-Reg $ebm 12) -eq 0 -and (Read-Reg $ebm 1) -eq 0 -and (Read-Reg $ebm 257) -eq 1) `
+    'kaydet: D100=42, D00C=0, D001=0 (dur), D101=1' `
+    ('D100=' + (Read-Reg $ebm 256) + ' D00C=' + (Read-Reg $ebm 12) + ' D001=' + (Read-Reg $ebm 1))
+Assert (-not (Visible $ebm 'gbEbm')) 'kayit sonrasi EBM modundan cikiliyor' 'panel acik kaldi'
+$defText = if (Test-Path $defPath) { [System.IO.File]::ReadAllText($defPath) } else { '' }
+Assert ($defText -like "*3`t256`tEBM*") 'EBM register tanimlari dosyaya kaydedildi' 'tanim yok'
+
+Invoke-Handler $ebm 'OnEbmEnter'
+Invoke-Handler $ebm 'OnEbmBack'
+Assert (-not (Visible $ebm 'gbEbm') -and (Read-Reg $ebm 1) -eq 0) 'Geri Don: panel kapaniyor, fan durduruluyor' 'durum yanlis'
+# EBM yazmalari reg1/reg12 yi degistirdi; float desen testleri bozulmasin diye ilk degerlere geri al.
+$tcpE = Get-Field $ebm '_tcp'
+$wm = $tcpE.GetType().GetMethod('WriteSingleRegister')
+$wm.Invoke($tcpE, @(1, 0xF5C3, 2000)) | Out-Null
+$wm.Invoke($tcpE, @(12, 0xF5C3, 2000)) | Out-Null
+Close-Form $ebm
+
+# --- Ayar kaliciligi: son girilen degerler yeniden baslayinca geri geliyor ---
+$setA = [Activator]::CreateInstance($type)
+$setA.Show()   # FormClosing yalnizca gosterilmis formda tetiklenir
+(Get-Field $setA 'txtIp').Text = '10.20.30.40'
+(Get-Field $setA 'txtPort').Text = '5030'
+(Get-Field $setA 'txtUnit').Text = '9'
+(Get-Field $setA 'txtTimeout').Text = '1500'
+(Get-Field $setA 'cmbMode').SelectedIndex = 1
+Set-Combo $setA 'cmbBaud' 4
+Set-Combo $setA 'cmbParity' 2
+Set-Combo $setA 'cmbStop' 2
+Set-Combo $setA 'cmbFunction' 1
+(Get-Field $setA 'txtAddress').Text = '100'
+(Get-Field $setA 'txtQuantity').Text = '25'
+Set-Combo $setA 'cmbDecode' 2
+Set-Combo $setA 'cmbWordOrder' 1
+(Get-Field $setA 'chkConvention').Checked = $false
+Close-Form $setA   # OnFormClosing ayarlari kaydeder
+
+$setB = [Activator]::CreateInstance($type)
+$ok = ((Get-Field $setB 'txtIp').Text -eq '10.20.30.40') -and
+      ((Get-Field $setB 'txtPort').Text -eq '5030') -and
+      ((Get-Field $setB 'txtUnit').Text -eq '9') -and
+      ((Get-Field $setB 'txtTimeout').Text -eq '1500') -and
+      ((Get-Field $setB 'cmbMode').SelectedIndex -eq 1) -and
+      ((Get-Field $setB 'cmbBaud').Text -eq '19200') -and
+      ((Get-Field $setB 'cmbParity').Text -eq 'Çift') -and
+      ((Get-Field $setB 'cmbStop').Text -eq '2') -and
+      ((Get-Field $setB 'cmbFunction').SelectedIndex -eq 1) -and
+      ((Get-Field $setB 'txtAddress').Text -eq '100') -and
+      ((Get-Field $setB 'txtQuantity').Text -eq '25') -and
+      ((Get-Field $setB 'cmbDecode').SelectedIndex -eq 2) -and
+      ((Get-Field $setB 'cmbWordOrder').SelectedIndex -eq 1) -and
+      (-not (Get-Field $setB 'chkConvention').Checked)
+Assert $ok 'ayarlar (ip/port/mod/baud/okuma) yeni pencerede geri yuklendi' `
+    ('ip=' + (Get-Field $setB 'txtIp').Text + ' mod=' + (Get-Field $setB 'cmbMode').SelectedIndex + ' baud=' + (Get-Field $setB 'cmbBaud').Text)
+Close-Form $setB
+# Sonraki formlar varsayilanlarla baslasin: gecici ayar dosyasini kaldir.
+if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
+
+# Kullanicinin kendi dosyalarina dokunulmadigini dogrula ve gecici klasoru topla.
 $userDefAfter = if (Test-Path $userDefPath) { [System.IO.File]::ReadAllBytes($userDefPath) } else { $null }
 $untouched = ($null -eq $userDefBefore -and $null -eq $userDefAfter)
 if (-not $untouched -and $null -ne $userDefBefore -and $null -ne $userDefAfter) {
     $untouched = ([System.BitConverter]::ToString($userDefBefore) -eq [System.BitConverter]::ToString($userDefAfter))
 }
 Assert $untouched 'kullanici tanim dosyasina dokunulmadi' ('farkli baytlar: ' + $userDefBefore.Length + ' -> ' + $userDefAfter.Length)
+
+foreach ($pair in @(@('ayar', $userSettingsPath, $userSettingsBefore), @('tarama plani', $userScanPlanPath, $userScanPlanBefore))) {
+    $after = if (Test-Path $pair[1]) { [System.IO.File]::ReadAllBytes($pair[1]) } else { $null }
+    $same = ($null -eq $pair[2] -and $null -eq $after)
+    if (-not $same -and $null -ne $pair[2] -and $null -ne $after) {
+        $same = ([System.BitConverter]::ToString($pair[2]) -eq [System.BitConverter]::ToString($after))
+    }
+    Assert $same ('kullanici ' + $pair[0] + ' dosyasina dokunulmadi') 'farkli baytlar'
+}
 
 if (Test-Path $defDir) { Remove-Item $defDir -Recurse -Force }
 

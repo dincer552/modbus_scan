@@ -6,7 +6,8 @@
 # Test amacli sahte Modbus TCP sunucusu. Gercek cihaz yokken istemciyi dogrulamak icin kullanilir.
 $ErrorActionPreference = 'Stop'
 
-$script:Holding = New-Object 'byte[]' 40
+# 600 register: EBM adresleme testleri D100 (256) / D101 (257) alanina da yazabilsin.
+$script:Holding = New-Object 'byte[]' 1200
 $script:Coils = @{}
 # Hata toleransi senaryosu: okuma araligi bu kayitlara dokunursa cihaz exception 2 verir.
 $script:Illegal = 400, 401, 450
