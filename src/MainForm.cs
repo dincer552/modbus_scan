@@ -48,6 +48,19 @@ namespace ModbusScan
         private Button btnScanBack;
         private Panel scanOptions;
         private TextBox txtScanUnitStart, txtScanUnitEnd, txtScanTimeout;
+        private Panel scanSerial;
+        private CheckBox[] _scanBaudChecks, _scanParityChecks, _scanStopChecks;
+        private Label lblScanSerialInfo;
+        private static readonly int[] ScanBaudRates = { 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
+        private static readonly string[] ScanParityNames = { "Yok", "Tek", "Çift" };
+        private static readonly string[] ScanStopNames = { "1", "1.5", "2" };
+        private sealed class SerialCombo
+        {
+            public int Baud;
+            public Parity Parity;
+            public StopBits Stop;
+            public string Text;
+        }
         private sealed class ScanSegment
         {
             public bool Enabled;
@@ -135,6 +148,9 @@ namespace ModbusScan
                         case "scanunitstart": txtScanUnitStart.Text = val; break;
                         case "scanunitend": txtScanUnitEnd.Text = val; break;
                         case "scantimeout": txtScanTimeout.Text = val; break;
+                        case "scanbauds": ApplyScanChecks(_scanBaudChecks, ScanBaudRates, val); break;
+                        case "scanparities": ApplyScanChecks(_scanParityChecks, ScanParityNames, val); break;
+                        case "scanstops": ApplyScanChecks(_scanStopChecks, ScanStopNames, val); break;
                     }
                 }
             }
@@ -151,6 +167,46 @@ namespace ModbusScan
                     return;
                 }
             }
+        }
+
+        private static void ApplyScanChecks(CheckBox[] checks, int[] values, string csv)
+        {
+            string[] parts = csv.Split(',');
+            for (int i = 0; i < checks.Length; i++)
+            {
+                bool found = false;
+                for (int j = 0; j < parts.Length; j++)
+                    if (parts[j].Trim() == values[i].ToString()) { found = true; break; }
+                checks[i].Checked = found;
+            }
+        }
+
+        private static void ApplyScanChecks(CheckBox[] checks, string[] values, string csv)
+        {
+            string[] parts = csv.Split(',');
+            for (int i = 0; i < checks.Length; i++)
+            {
+                bool found = false;
+                for (int j = 0; j < parts.Length; j++)
+                    if (string.Equals(parts[j].Trim(), values[i], StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                checks[i].Checked = found;
+            }
+        }
+
+        private static string CheckedCsv(CheckBox[] checks, int[] values)
+        {
+            List<string> sel = new List<string>();
+            for (int i = 0; i < checks.Length; i++)
+                if (checks[i].Checked) sel.Add(values[i].ToString());
+            return string.Join(",", sel.ToArray());
+        }
+
+        private static string CheckedCsv(CheckBox[] checks, string[] values)
+        {
+            List<string> sel = new List<string>();
+            for (int i = 0; i < checks.Length; i++)
+                if (checks[i].Checked) sel.Add(values[i]);
+            return string.Join(",", sel.ToArray());
         }
 
         private void SaveSettings()
@@ -178,7 +234,10 @@ namespace ModbusScan
                     "convention=" + (chkConvention.Checked ? "1" : "0"),
                     "scanunitstart=" + txtScanUnitStart.Text.Trim(),
                     "scanunitend=" + txtScanUnitEnd.Text.Trim(),
-                    "scantimeout=" + txtScanTimeout.Text.Trim()
+                    "scantimeout=" + txtScanTimeout.Text.Trim(),
+                    "scanbauds=" + CheckedCsv(_scanBaudChecks, ScanBaudRates),
+                    "scanparities=" + CheckedCsv(_scanParityChecks, ScanParityNames),
+                    "scanstops=" + CheckedCsv(_scanStopChecks, ScanStopNames)
                 };
                 File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
             }
@@ -605,8 +664,55 @@ namespace ModbusScan
             lblScanHint.ForeColor = Color.DimGray;
             scanOptions.Controls.Add(lblScanHint);
 
+            // Seri parametre seçimi: işaretli baud × parite × stop kombinasyonlarının tümü denenir (yalnız RS485).
+            scanSerial = new Panel();
+            scanSerial.SetBounds(6, 210, 472, 66);
+            scanSerial.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            scanSerial.Visible = false;
+            scanSerial.Controls.Add(MakeLabel("Baud", 2, 3));
+            _scanBaudChecks = new CheckBox[ScanBaudRates.Length];
+            for (int i = 0; i < ScanBaudRates.Length; i++)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Text = ScanBaudRates[i].ToString();
+                cb.SetBounds(38 + i * 54, 0, 54, 20);
+                cb.AutoSize = false;
+                cb.Font = new Font("Segoe UI", 7.5f);
+                cb.Checked = ScanBaudRates[i] == 9600;
+                _scanBaudChecks[i] = cb;
+                scanSerial.Controls.Add(cb);
+            }
+            scanSerial.Controls.Add(MakeLabel("Parite", 2, 25));
+            _scanParityChecks = new CheckBox[ScanParityNames.Length];
+            for (int i = 0; i < ScanParityNames.Length; i++)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Text = ScanParityNames[i];
+                cb.SetBounds(44 + i * 52, 22, 52, 20);
+                cb.AutoSize = false;
+                cb.Checked = i == 0;
+                _scanParityChecks[i] = cb;
+                scanSerial.Controls.Add(cb);
+            }
+            scanSerial.Controls.Add(MakeLabel("Stop", 208, 25));
+            _scanStopChecks = new CheckBox[ScanStopNames.Length];
+            for (int i = 0; i < ScanStopNames.Length; i++)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Text = ScanStopNames[i];
+                cb.SetBounds(242 + i * 44, 22, 44, 20);
+                cb.AutoSize = false;
+                cb.Checked = i == 0;
+                _scanStopChecks[i] = cb;
+                scanSerial.Controls.Add(cb);
+            }
+            lblScanSerialInfo = MakeLabel("İşaretli kombinasyonların tümü, seçili ID aralığında baştan sona taranır.", 2, 47);
+            lblScanSerialInfo.ForeColor = Color.DimGray;
+            scanSerial.Controls.Add(lblScanSerialInfo);
+
             gbScan.Controls.Add(scanGrid);
             gbScan.Controls.Add(scanOptions);
+            gbScan.Controls.Add(scanSerial);
             gbScan.Controls.Add(btnScanAdd);
             gbScan.Controls.Add(btnScanRemove);
             gbScan.Controls.Add(btnScanRun);
@@ -713,6 +819,7 @@ namespace ModbusScan
             if (gbScan.Visible)
             {
                 gbEbm.Visible = false;
+                UpdateScanSerialInfo();
                 UpdateScanPanelSize();
             }
             RelayoutPanels();
@@ -724,7 +831,9 @@ namespace ModbusScan
             int gridH = 23 + rows * 22;
             scanGrid.Height = gridH;
             scanOptions.Top = 18 + gridH + 4;
-            gbScan.Height = Math.Max(gridH + 26 + 28, 132);
+            scanSerial.Top = scanOptions.Top + 24 + 2;
+            int extra = scanSerial.Visible ? scanSerial.Height + 4 : 0;
+            gbScan.Height = Math.Max(gridH + 26 + 28, 132) + extra;
         }
 
         /// <summary>Tarama/EBM paneli açıkken güncelleme şeridini ve tabloyu aşağı kaydırır; çakışmayı önler.</summary>
@@ -1031,114 +1140,175 @@ namespace ModbusScan
             }
             if (!int.TryParse(txtScanTimeout.Text.Trim(), out scanMs) || scanMs < 50) scanMs = 300;
 
+            bool rtu = SelectedIsRtu();
+            List<SerialCombo> combos = null;
+            if (rtu)
+            {
+                combos = CollectSerialCombos();
+                if (combos.Count == 0)
+                {
+                    lblSummary.Text = "En az bir baud/parite/stop kombinasyonu işaretleyin.";
+                    return;
+                }
+            }
+
             scanResultGrid.Rows.Clear();
             ShowScanResults(true);
-            RunScanAsync(uStart, uEnd, scanMs);
+            RunScanAsync(uStart, uEnd, scanMs, rtu, combos);
         }
 
-        private void RunScanAsync(int uStart, int uEnd, int scanMs)
+        private void RunScanAsync(int uStart, int uEnd, int scanMs, bool rtu, List<SerialCombo> combos)
         {
             btnScanRun.Enabled = false;
             btnScanRun.Text = "Taranıyor...";
             btnRead.Enabled = false;
 
+            // UI değerlerini iş parçacığı başlamadan yakala (cross-thread okuma güvenliği).
+            string portName = cmbSerialPort.Text.Trim();
+            int origBaud;
+            if (!int.TryParse(cmbBaud.Text.Trim(), out origBaud) || origBaud < 300) origBaud = 9600;
+            Parity origParity = SelectedParity();
+            StopBits origStop = SelectedStopBits();
+            int connTimeout;
+            if (!int.TryParse(txtTimeout.Text.Trim(), out connTimeout) || connTimeout < 100) connTimeout = 2000;
+            int comboCount = (combos != null) ? combos.Count : 1;
+
             System.Threading.Thread worker = new System.Threading.Thread(delegate()
             {
-                ModbusClient client = Client;
+                ModbusClient client = rtu ? (ModbusClient)_rtu : _tcp;
                 byte origUnit = client.UnitId;
                 int found = 0;
                 int scanned = 0;
                 try
                 {
-                    for (int unit = uStart; unit <= uEnd; unit++)
+                    for (int ci = 0; ci < comboCount; ci++)
                     {
-                        if (!client.IsConnected) break;
-                        client.UnitId = (byte)unit;
-                        bool deviceSeen = false;
-
-                        for (int i = 0; i < _scanSegments.Count; i++)
+                        string comboLabel = "";
+                        if (rtu && combos != null)
                         {
-                            ScanSegment s = _scanSegments[i];
-                            if (!s.Enabled) continue;
-
-                            byte fc = s.Function;
-                            int start = s.StartAddress;
-                            int qty = s.Quantity;
-                            int decodeIdx = s.DecodeIndex;
-                            int wordIdx = s.WordOrderIndex;
-                            bool show4xx = s.Show4xx;
-
-                            // Keşif: tek register probe. Yanıt yoksa bu ID'de cihaz yok demektir.
-                            if (!client.Probe(fc, start, scanMs)) continue;
-
-                            if (!deviceSeen)
+                            SerialCombo combo = combos[ci];
+                            comboLabel = combo.Text;
+                            try
                             {
-                                deviceSeen = true;
-                                found++;
-                                int foundNow = found;
-                                int unitNow = unit;
-                                Ui(delegate
-                                {
-                                    int row = scanResultGrid.Rows.Add();
-                                    scanResultGrid.Rows[row].Cells["rDevice"].Value = "ID " + unitNow;
-                                    scanResultGrid.Rows[row].Cells["rValue"].Value = "--- cihaz bulundu (" + foundNow + ".) ---";
-                                    scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
-                                    scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
-                                });
-                                Log("Cihaz bulundu: ID " + unit);
+                                _rtu.Close();
+                                _rtu.Connect(portName, combo.Baud, combo.Parity, 8, combo.Stop, connTimeout);
                             }
-
-                            int readMs = Math.Max(scanMs, 1000);
-                            RegisterRead read = client.ReadTolerant(fc, start, qty, readMs);
-                            if (read == null) continue;
-
+                            catch (Exception ex)
+                            {
+                                Log("Kombinasyon açılamadı (" + comboLabel + "): " + ex.Message);
+                                continue;
+                            }
+                            int ciNow = ci;
                             Ui(delegate
                             {
+                                lblSummary.Text = "Tarama: " + comboLabel + " (" + (ciNow + 1) + "/" + comboCount + ")";
                                 int row = scanResultGrid.Rows.Add();
-                                scanResultGrid.Rows[row].Cells["rValue"].Value = "--- " + s.Name + " (FC" + FunctionName(fc) + " " + start + ".." + (start + qty - 1) + ") ---";
-                                scanResultGrid.Rows[row].DefaultCellStyle.ForeColor = Color.DimGray;
+                                scanResultGrid.Rows[row].Cells["rValue"].Value = "=== " + comboLabel + " ===";
+                                scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(220, 230, 241);
+                                scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
                             });
+                            Log("Kombinasyon taranıyor: " + comboLabel);
+                        }
 
-                            for (int r = 0; r < qty; r++)
+                        for (int unit = uStart; unit <= uEnd; unit++)
+                        {
+                            if (!client.IsConnected) break;
+                            client.UnitId = (byte)unit;
+                            bool deviceSeen = false;
+
+                            for (int i = 0; i < _scanSegments.Count; i++)
                             {
-                                int addr = start + r;
-                                string errorText = null;
-                                if (read.ItemErrors != null && r < read.ItemErrors.Length)
-                                    errorText = read.ItemErrors[r];
-                                string valText = errorText != null
-                                    ? errorText
-                                    : ValueOf(read, r, fc == 1 || fc == 2, decodeIdx, (WordOrder)wordIdx);
-                                string addrText = show4xx ? ModbusTcpClient.DisplayAddress(fc, addr, true).ToString() : addr.ToString();
-                                string def = DefinitionOf(fc, addr);
+                                ScanSegment s = _scanSegments[i];
+                                if (!s.Enabled) continue;
+
+                                byte fc = s.Function;
+                                int start = s.StartAddress;
+                                int qty = s.Quantity;
+                                int decodeIdx = s.DecodeIndex;
+                                int wordIdx = s.WordOrderIndex;
+                                bool show4xx = s.Show4xx;
+
+                                if (!client.Probe(fc, start, scanMs)) continue;
+
+                                if (!deviceSeen)
+                                {
+                                    deviceSeen = true;
+                                    found++;
+                                    int foundNow = found;
+                                    int unitNow = unit;
+                                    string cl = comboLabel;
+                                    Ui(delegate
+                                    {
+                                        int row = scanResultGrid.Rows.Add();
+                                        scanResultGrid.Rows[row].Cells["rDevice"].Value = "ID " + unitNow;
+                                        string hdr = "--- cihaz bulundu (" + foundNow + ".) ---";
+                                        if (cl.Length > 0) hdr = "--- cihaz bulundu (" + foundNow + ".) [" + cl + "] ---";
+                                        scanResultGrid.Rows[row].Cells["rValue"].Value = hdr;
+                                        scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
+                                        scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
+                                    });
+                                    Log("Cihaz bulundu: ID " + unit + (comboLabel.Length > 0 ? " @ " + comboLabel : ""));
+                                }
+
+                                int readMs = Math.Max(scanMs, 1000);
+                                RegisterRead read = client.ReadTolerant(fc, start, qty, readMs);
+                                if (read == null) continue;
 
                                 Ui(delegate
                                 {
                                     int row = scanResultGrid.Rows.Add();
-                                    scanResultGrid.Rows[row].Cells["rAddress"].Value = addrText;
-                                    scanResultGrid.Rows[row].Cells["rValue"].Value = valText;
-                                    if (def.Length > 0) scanResultGrid.Rows[row].Cells["rDef"].Value = def;
-                                    if (errorText != null)
-                                    {
-                                        scanResultGrid.Rows[row].Cells["rValue"].Style.ForeColor = Color.Red;
-                                        scanResultGrid.Rows[row].Cells["rValue"].ToolTipText = errorText;
-                                    }
+                                    scanResultGrid.Rows[row].Cells["rValue"].Value = "--- " + s.Name + " (FC" + FunctionName(fc) + " " + start + ".." + (start + qty - 1) + ") ---";
+                                    scanResultGrid.Rows[row].DefaultCellStyle.ForeColor = Color.DimGray;
                                 });
-                            }
-                        }
 
-                        scanned++;
-                        int scannedNow = scanned;
-                        int foundNow2 = found;
-                        int unitNow2 = unit;
-                        Ui(delegate
-                        {
-                            lblSummary.Text = "Tarama: ID " + unitNow2 + "/" + uEnd + " — " + foundNow2 + " cihaz bulundu";
-                        });
+                                for (int r = 0; r < qty; r++)
+                                {
+                                    int addr = start + r;
+                                    string errorText = null;
+                                    if (read.ItemErrors != null && r < read.ItemErrors.Length)
+                                        errorText = read.ItemErrors[r];
+                                    string valText = errorText != null
+                                        ? errorText
+                                        : ValueOf(read, r, fc == 1 || fc == 2, decodeIdx, (WordOrder)wordIdx);
+                                    string addrText = show4xx ? ModbusTcpClient.DisplayAddress(fc, addr, true).ToString() : addr.ToString();
+                                    string def = DefinitionOf(fc, addr);
+
+                                    Ui(delegate
+                                    {
+                                        int row = scanResultGrid.Rows.Add();
+                                        scanResultGrid.Rows[row].Cells["rAddress"].Value = addrText;
+                                        scanResultGrid.Rows[row].Cells["rValue"].Value = valText;
+                                        if (def.Length > 0) scanResultGrid.Rows[row].Cells["rDef"].Value = def;
+                                        if (errorText != null)
+                                        {
+                                            scanResultGrid.Rows[row].Cells["rValue"].Style.ForeColor = Color.Red;
+                                            scanResultGrid.Rows[row].Cells["rValue"].ToolTipText = errorText;
+                                        }
+                                    });
+                                }
+                            }
+
+                            scanned++;
+                            int scannedNow = scanned;
+                            int foundNow2 = found;
+                            int unitNow2 = unit;
+                            string cl2 = comboLabel;
+                            Ui(delegate
+                            {
+                                string prefix = cl2.Length > 0 ? cl2 + " — " : "";
+                                lblSummary.Text = "Tarama: " + prefix + "ID " + unitNow2 + "/" + uEnd + " — " + foundNow2 + " cihaz bulundu";
+                            });
+                        }
                     }
                 }
                 finally
                 {
                     client.UnitId = origUnit;
+                    if (rtu && combos != null && combos.Count > 0)
+                    {
+                        try { _rtu.Close(); _rtu.Connect(portName, origBaud, origParity, 8, origStop, connTimeout); }
+                        catch (Exception) { }
+                    }
                 }
 
                 Ui(delegate
@@ -1146,8 +1316,9 @@ namespace ModbusScan
                     btnScanRun.Enabled = true;
                     btnScanRun.Text = "TARA";
                     btnRead.Enabled = client.IsConnected;
-                    lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı)";
-                    Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID");
+                    string comboNote = comboCount > 1 ? ", " + comboCount + " kombinasyon" : "";
+                    lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı" + comboNote + ")";
+                    Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote);
                 });
             });
             worker.IsBackground = true;
@@ -1398,6 +1569,44 @@ namespace ModbusScan
                 btnDisconnect.SetBounds(392, 23, 80, 25);
                 AnchorLeft(lblUnit, txtUnit, lblMs, txtTimeout);
             }
+
+            if (scanSerial != null)
+            {
+                scanSerial.Visible = rtu;
+                UpdateScanSerialInfo();
+                if (gbScan != null && gbScan.Visible) { UpdateScanPanelSize(); RelayoutPanels(); }
+            }
+        }
+
+        private void UpdateScanSerialInfo()
+        {
+            if (lblScanSerialInfo == null) return;
+            lblScanSerialInfo.Text = "Şu an: " + cmbBaud.Text + " " + cmbParity.Text + " " + cmbStop.Text
+                + " — işaretli tüm kombinasyonlar, seçili ID aralığında taranır.";
+        }
+
+        private List<SerialCombo> CollectSerialCombos()
+        {
+            List<SerialCombo> list = new List<SerialCombo>();
+            for (int b = 0; b < _scanBaudChecks.Length; b++)
+            {
+                if (!_scanBaudChecks[b].Checked) continue;
+                for (int p = 0; p < _scanParityChecks.Length; p++)
+                {
+                    if (!_scanParityChecks[p].Checked) continue;
+                    for (int s = 0; s < _scanStopChecks.Length; s++)
+                    {
+                        if (!_scanStopChecks[s].Checked) continue;
+                        SerialCombo c = new SerialCombo();
+                        c.Baud = ScanBaudRates[b];
+                        c.Parity = p == 1 ? Parity.Odd : (p == 2 ? Parity.Even : Parity.None);
+                        c.Stop = s == 1 ? StopBits.OnePointFive : (s == 2 ? StopBits.Two : StopBits.One);
+                        c.Text = c.Baud + " " + ScanParityNames[p] + " " + ScanStopNames[s];
+                        list.Add(c);
+                    }
+                }
+            }
+            return list;
         }
 
         private void OnModeChanged(object sender, EventArgs e)

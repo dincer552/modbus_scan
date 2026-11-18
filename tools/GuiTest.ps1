@@ -854,6 +854,52 @@ Assert (-not (Visible $scan 'gbScan') -and (Get-Field $scan 'grid').Top -eq 254)
     'panel kapaninca duzen eski haline donuyor' ('tabloUst=' + (Get-Field $scan 'grid').Top)
 Close-Form $scan
 
+# --- Seri parametre secimi: baud/parite/stop checkbox'lari ve kombinasyon toplama (RS485) ---
+$sc = [Activator]::CreateInstance($type)
+$sc.Show()
+Assert (-not (Visible $sc 'scanSerial')) 'TCP modunda seri secim paneli gizli' 'gorunur'
+Set-Combo $sc 'cmbMode' 1
+Assert ((Visible $sc 'scanSerial')) 'RS485 modunda seri secim paneli gorunur' 'gizli'
+Assert ((Visible $sc 'gbScan')) 'seri test: tarama paneli acik (plan dosyasindan)' 'acilmadi'
+
+$baudChecks = Get-Field $sc '_scanBaudChecks'
+$parChecks = Get-Field $sc '_scanParityChecks'
+$stopChecks = Get-Field $sc '_scanStopChecks'
+foreach ($cb in $baudChecks) { $cb.Checked = $false }
+foreach ($cb in $parChecks) { $cb.Checked = $false }
+foreach ($cb in $stopChecks) { $cb.Checked = $false }
+$baudChecks[3].Checked = $true   # 9600
+$baudChecks[4].Checked = $true   # 19200
+$parChecks[0].Checked = $true    # Yok
+$parChecks[2].Checked = $true    # Cift
+$stopChecks[0].Checked = $true   # 1
+$stopChecks[2].Checked = $true   # 2
+
+$mCollect = $sc.GetType().GetMethod('CollectSerialCombos', $flags)
+$combos = $mCollect.Invoke($sc, @())
+Assert ($combos.Count -eq 8) '2 baud x 2 parite x 2 stop = 8 kombinasyon' ('adet=' + $combos.Count)
+Assert ([string]$combos[0].Text -eq '9600 Yok 1') 'ilk kombinasyon metni dogru' ([string]$combos[0].Text)
+Assert ($combos[0].Baud -eq 9600 -and $combos[7].Baud -eq 19200) 'kombinasyon baud degerleri dogru' 'baud yanlis'
+
+Set-Combo $sc 'cmbMode' 0
+Assert (-not (Visible $sc 'scanSerial')) 'TCP moduna donunce seri paneli tekrar gizleniyor' 'gorunur'
+Close-Form $sc
+
+$sc2 = [Activator]::CreateInstance($type)
+$sc2.Show()
+Set-Combo $sc2 'cmbMode' 1
+$baudChecks2 = Get-Field $sc2 '_scanBaudChecks'
+$parChecks2 = Get-Field $sc2 '_scanParityChecks'
+$stopChecks2 = Get-Field $sc2 '_scanStopChecks'
+Assert ($baudChecks2[3].Checked -and $baudChecks2[4].Checked -and -not $baudChecks2[0].Checked) `
+    'seri secimleri yeni pencerede geri yuklendi (baud)' 'baud kaliciligi bozuk'
+Assert ($parChecks2[0].Checked -and $parChecks2[2].Checked -and -not $parChecks2[1].Checked) `
+    'seri secimleri yeni pencerede geri yuklendi (parite)' 'parite kaliciligi bozuk'
+Assert ($stopChecks2[0].Checked -and $stopChecks2[2].Checked -and -not $stopChecks2[1].Checked) `
+    'seri secimleri yeni pencerede geri yuklendi (stop)' 'stop kaliciligi bozuk'
+Set-Combo $sc2 'cmbMode' 0
+Close-Form $sc2
+
 # --- EBM fan adresleme: %25 start, adres kaydi, geri donus (yalnizca sahte sunucuya yazilir) ---
 $ebm = [Activator]::CreateInstance($type)
 $ebm.Show()
