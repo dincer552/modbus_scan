@@ -7,7 +7,7 @@ Yazma: FC05 (coil), FC06 (tek register), FC16 (birden çok register) — tabloda
 Not: her kayıt için kendi adını yazabildiğin **Tanım** sütunu; Excel'den kopyalayıp Ctrl+V ile yapıştırılabilir, Delete tuşu veya sağ tık menüsüyle temizlenebilir.
 Adresi olmayan (ilegal) kayıtlar okumayı bozmaz: hücre hatasıyla işaretlenir, geri kalan kayıtlar okunmaya devam eder.
 Şeffaf arka planlı bir simgesi vardır; masaüstü ve Başlat Menüsü kısayolları sağ tık menüsünden üretilir.
-**Tarama paneli**: kaydedilmiş çoklu aralıkları (ad, fonksiyon, başlangıç/bitiş, çözümleme) işaretleyip **TARA** ile tek seferde okuyun; sonuçlar ana tabloya segment başlıklarıyla eklenir, plan `%APPDATA%\ModbusScan\scanplan.txt` kalıcı.
+**Tarama paneli (cihaz keşifli)**: ID aralığı (1..247) ve segment ayarlarıyla hattı tarayın; yanıt veren **Modbus cihazları** bulunur ve adres bilgileriyle ayrı bir **sonuç tablosunda** listelenir (normal register tablosu o sırada gizlenir). Plan `%APPDATA%\ModbusScan\scanplan.txt` kalıcı.
 **Ayar kalıcılığı**: son girilen IP/port/ünite, COM/baud/parite, fonksiyon/adres/adet ve çözümleme seçimleri `%APPDATA%\ModbusScan\settings.txt` dosyasına kaydedilir; program yeniden açıldığında geri gelir.
 **EBM fan adresleme**: ebm-papst fanlar için ayrı panel — %25 start ile gözle teyit, ardından fan adresini (D100) ve ilgili registerları kaydedip işlemi bitirir.
 
@@ -112,7 +112,9 @@ Okuma kutusunun altındaki **Tarama** düğmesi paneli açar/kapatır (kayıtlı
 
 **Ekle** butonu mevcut bağlantı/okuma ayarlarından bir segment önerir; **Sil** seçili satırı kaldırır; plan `%APPDATA%\ModbusScan\scanplan.txt` dosyasına otomatik kaydedilir, program açılışında geri yüklenir.
 
-**TARA** butonu: bağlantı varken işaretli segmentleri sırayla okur (her segment kendi fonksiyon/adres/çözümleme ayarlarıyla). Sonuçlar ana tabloya eklenir; her segmentten önce **gri başlık satırı** (`--- Ad (FCxx baş..bit) ---`) konur, böylece nereden ne okundu belli olur. Hatalı kayıtlar diğer segmentleri engellemez (hata toleranslı okuma çalışır). Özet satır ve log'ta `Tarama tamamlandı: N / M kayıt` yazar.
+**Cihaz keşfi seçenekleri** (segment listesinin altındaki satır): `ID 1 – 247` taranacak ünite (slave) adres aralığı, `ms` keşif zaman aşımı (varsayılan 300). TARAMA sırasında her ID için önce tek register'lık bir **probe** gönderilir: yanıt gelirse (Modbus hata kodu dahil) cihaz **var** kabul edilir, gelmezse o ID atlanır. Böylece hattaki tüm cihazlar bulunur.
+
+**TARA** butonu: bağlantı varken ID aralığını sırayla tarar; bulunan her cihaz için işaretli segmentler kendi fonksiyon/adres/çözümleme ayarlarıyla okunur. Sonuçlar **ayrı sonuç tablosuna** yazılır (Cihaz / Adres / Değer / Tanım sütunları): önce gri **`ID n — cihaz bulundu`** başlığı, ardından segment başlığı ve register satırları. Normal register tablosu bu sırada **gizlenir**; **Tabloya dön** düğmesiyle (veya yeni bir OKU/Temizle ile) geri gelinir. Özet satırda `Tarama tamamlandı: X cihaz bulundu (Y ID tarandı)` yazar; tarama bitince ünite id eski değerine döner. Hatalı kayıtlar diğer segmentleri engellemez (hata toleranslı okuma çalışır).
 
 ## Ayar kalıcılığı
 
@@ -228,7 +230,7 @@ Yayinlanan EXE'nin adi `ModbusScan-vX.Y.Z.exe` olur. Uygulamanin guncelleyicisi 
 | `src/ModbusRtu.cs` | RS485/seri taşıması: SerialPort açma, COM listesi ve `Win32_PnPEntity` sürücü açıklamaları, `birim id + PDU + CRC16` çerçeveleme, yanıt uzunluğunu byte count'tan çözme, zaman aşımı ve yarım çerçeve temizliği |
 | `src/Updater.cs` | GitHub sürüm denetimi (302 yönlendirmesi), indirme doğrulama, kendini değiştiren betik |
 | `src/WriteDialog.cs` | Hücreye çift tıklayınca açılan yazma penceresi (tür seçimi, bayt önizleme, geri okuma) — TCP/RS485 ayrımı yoktur, ortak istemciyi kullanır |
-| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, **Tarama paneli** (kaydedilmiş çoklu aralıkları tek tıkla oku), **EBM fan adresleme** paneli (%25 start teyidi + D100 adres kaydı), `settings.txt` ayar kalıcılığı, log alanı |
+| `src/MainForm.cs` | 500 × 600 px pencere, TCP/RS485 seçimli bağlantı kutusu, okuma alanları, sonuç tablosu (# / Adres / Değer / Tanım), hatalı kayıtları işaretleyen tablo, tanım yapıştırma/temizleme ve `%APPDATA%\ModbusScan\definitions.txt` kalıcılığı, gömülü simge + masaüstü/Başlat Menüsü kısayol menüsü, **Tarama paneli** (ID aralığıyla cihaz keşfi + ayrı sonuç tablosu), **EBM fan adresleme** paneli (%25 start teyidi + D100 adres kaydı), `settings.txt` ayar kalıcılığı, log alanı |
 | `src/Program.cs` | Giriş noktası ve sürüm bilgisi |
 | `tools/SelfTest.cs` | Loopback soket + sahte seri akış ile çerçeve/protokol seviyesinde kendi kendine test (CI bunu koşar) |
 | `tools/Probe.cs` | Konsol okuma aracı (`--ip/--port` veya `--com/--baud/--parity/--stop`, `--list-ports`, `--tolerant`) |

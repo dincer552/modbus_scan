@@ -44,6 +44,10 @@ namespace ModbusScan
         private GroupBox gbScan;
         private DataGridView scanGrid;
         private Button btnScanAdd, btnScanRemove, btnScanRun;
+        private DataGridView scanResultGrid;
+        private Button btnScanBack;
+        private Panel scanOptions;
+        private TextBox txtScanUnitStart, txtScanUnitEnd, txtScanTimeout;
         private sealed class ScanSegment
         {
             public bool Enabled;
@@ -128,6 +132,9 @@ namespace ModbusScan
                         case "decode": SetComboByText(cmbDecode, val); break;
                         case "wordorder": SetComboByText(cmbWordOrder, val); break;
                         case "convention": chkConvention.Checked = val == "1"; break;
+                        case "scanunitstart": txtScanUnitStart.Text = val; break;
+                        case "scanunitend": txtScanUnitEnd.Text = val; break;
+                        case "scantimeout": txtScanTimeout.Text = val; break;
                     }
                 }
             }
@@ -168,7 +175,10 @@ namespace ModbusScan
                     "quantity=" + txtQuantity.Text.Trim(),
                     "decode=" + cmbDecode.Text.Trim(),
                     "wordorder=" + cmbWordOrder.Text.Trim(),
-                    "convention=" + (chkConvention.Checked ? "1" : "0")
+                    "convention=" + (chkConvention.Checked ? "1" : "0"),
+                    "scanunitstart=" + txtScanUnitStart.Text.Trim(),
+                    "scanunitend=" + txtScanUnitEnd.Text.Trim(),
+                    "scantimeout=" + txtScanTimeout.Text.Trim()
                 };
                 File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
             }
@@ -474,6 +484,7 @@ namespace ModbusScan
             Controls.Add(btnCheckUpdate);
             Controls.Add(btnUpdate);
             Controls.Add(grid);
+            Controls.Add(scanResultGrid);
             Controls.Add(txtLog);
 
             UpdateDecodeControls();
@@ -570,10 +581,71 @@ namespace ModbusScan
             btnScanRun.ForeColor = Color.White;
             btnScanRun.Click += OnScanRun;
 
+            btnScanBack = new Button();
+            btnScanBack.Text = "Tabloya dön";
+            btnScanBack.SetBounds(392, 102, 84, 23);
+            btnScanBack.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanBack.Visible = false;
+            btnScanBack.Click += OnScanBack;
+
+            // Cihaz keşfi seçenekleri: taranacak ünite ID aralığı ve keşif zaman aşımı.
+            scanOptions = new Panel();
+            scanOptions.SetBounds(6, 182, 380, 24);
+            scanOptions.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            scanOptions.Controls.Add(MakeLabel("ID", 2, 4));
+            txtScanUnitStart = MakeTextBox("1", 22, 0, 40);
+            scanOptions.Controls.Add(txtScanUnitStart);
+            scanOptions.Controls.Add(MakeLabel("–", 66, 4));
+            txtScanUnitEnd = MakeTextBox("247", 78, 0, 40);
+            scanOptions.Controls.Add(txtScanUnitEnd);
+            scanOptions.Controls.Add(MakeLabel("ms", 124, 4));
+            txtScanTimeout = MakeTextBox("300", 142, 0, 44);
+            scanOptions.Controls.Add(txtScanTimeout);
+            Label lblScanHint = MakeLabel("cihaz keşfi: bu ID aralığı taranır", 196, 4);
+            lblScanHint.ForeColor = Color.DimGray;
+            scanOptions.Controls.Add(lblScanHint);
+
             gbScan.Controls.Add(scanGrid);
+            gbScan.Controls.Add(scanOptions);
             gbScan.Controls.Add(btnScanAdd);
             gbScan.Controls.Add(btnScanRemove);
             gbScan.Controls.Add(btnScanRun);
+            gbScan.Controls.Add(btnScanBack);
+
+            // Tarama sonuçları tablosu: normal register tablosunun yerini alır.
+            scanResultGrid = new DataGridView();
+            scanResultGrid.SetBounds(8, 254, 484, 218);
+            scanResultGrid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            scanResultGrid.AllowUserToAddRows = false;
+            scanResultGrid.AllowUserToDeleteRows = false;
+            scanResultGrid.AllowUserToResizeRows = false;
+            scanResultGrid.RowHeadersVisible = false;
+            scanResultGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            scanResultGrid.MultiSelect = false;
+            scanResultGrid.ReadOnly = true;
+            scanResultGrid.ScrollBars = ScrollBars.Vertical;
+            scanResultGrid.BackgroundColor = Color.White;
+            scanResultGrid.BorderStyle = BorderStyle.Fixed3D;
+            scanResultGrid.Font = new Font("Consolas", 9f);
+            scanResultGrid.Visible = false;
+            scanResultGrid.Columns.Add(NewColumn("rDevice", "Cihaz", 56, DataGridViewAutoSizeColumnMode.None, true));
+            scanResultGrid.Columns.Add(NewColumn("rAddress", "Adres", 70, DataGridViewAutoSizeColumnMode.None, true));
+            scanResultGrid.Columns.Add(NewColumn("rValue", "Değer", 120, DataGridViewAutoSizeColumnMode.None, true));
+            DataGridViewTextBoxColumn colRDef = NewColumn("rDef", "Tanım", 220, DataGridViewAutoSizeColumnMode.Fill, false);
+            colRDef.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            scanResultGrid.Columns.Add(colRDef);
+        }
+
+        private void ShowScanResults(bool show)
+        {
+            grid.Visible = !show;
+            scanResultGrid.Visible = show;
+            btnScanBack.Visible = show;
+        }
+
+        private void OnScanBack(object sender, EventArgs e)
+        {
+            ShowScanResults(false);
         }
 
         /// <summary>EBM-papst fan adresleme paneli: %25 start teyidi + adres kaydı (RTU, D100/D001/D101/D00C).</summary>
@@ -651,7 +723,8 @@ namespace ModbusScan
             int rows = Math.Max(1, Math.Min(_scanSegments.Count, 6));
             int gridH = 23 + rows * 22;
             scanGrid.Height = gridH;
-            gbScan.Height = gridH + 26;
+            scanOptions.Top = 18 + gridH + 4;
+            gbScan.Height = Math.Max(gridH + 26 + 28, 132);
         }
 
         /// <summary>Tarama/EBM paneli açıkken güncelleme şeridini ve tabloyu aşağı kaydırır; çakışmayı önler.</summary>
@@ -666,6 +739,8 @@ namespace ModbusScan
             btnUpdate.Top = 224 + off;
             grid.Top = 254 + off;
             grid.Height = Math.Max(60, 472 - grid.Top);
+            scanResultGrid.Top = 254 + off;
+            scanResultGrid.Height = Math.Max(60, 472 - scanResultGrid.Top);
 
             int minH = 430 + off;
             if (MinimumSize.Height != minH)
@@ -943,10 +1018,25 @@ namespace ModbusScan
                 lblSummary.Text = "Tarama için en az bir segment işaretli olmalı.";
                 return;
             }
-            RunScanAsync();
+            int uStart, uEnd, scanMs;
+            if (!int.TryParse(txtScanUnitStart.Text.Trim(), out uStart) || uStart < 1 || uStart > 247)
+            {
+                lblSummary.Text = "ID başlangıç 1..247 olmalı.";
+                return;
+            }
+            if (!int.TryParse(txtScanUnitEnd.Text.Trim(), out uEnd) || uEnd < uStart || uEnd > 247)
+            {
+                lblSummary.Text = "ID bitiş, başlangıçtan küçük olamaz (1..247).";
+                return;
+            }
+            if (!int.TryParse(txtScanTimeout.Text.Trim(), out scanMs) || scanMs < 50) scanMs = 300;
+
+            scanResultGrid.Rows.Clear();
+            ShowScanResults(true);
+            RunScanAsync(uStart, uEnd, scanMs);
         }
 
-        private void RunScanAsync()
+        private void RunScanAsync(int uStart, int uEnd, int scanMs)
         {
             btnScanRun.Enabled = false;
             btnScanRun.Text = "Taranıyor...";
@@ -954,102 +1044,110 @@ namespace ModbusScan
 
             System.Threading.Thread worker = new System.Threading.Thread(delegate()
             {
-                int totalExpected = 0;
-                foreach (ScanSegment s in _scanSegments)
-                    if (s.Enabled) totalExpected += s.Quantity;
-
-                int overallDone = 0;
-                for (int i = 0; i < _scanSegments.Count; i++)
+                ModbusClient client = Client;
+                byte origUnit = client.UnitId;
+                int found = 0;
+                int scanned = 0;
+                try
                 {
-                    ScanSegment s = _scanSegments[i];
-                    if (!s.Enabled) continue;
-
-                    byte fc = s.Function;
-                    int start = s.StartAddress;
-                    int qty = s.Quantity;
-                    int decodeIdx = s.DecodeIndex;
-                    int wordIdx = s.WordOrderIndex;
-                    bool show4xx = s.Show4xx;
-
-                    // Başlık satırı ekle
-                    Ui(delegate
+                    for (int unit = uStart; unit <= uEnd; unit++)
                     {
-                        int row = grid.Rows.Add();
-                        grid.Rows[row].Cells["colIndex"].Value = s.Name;
-                        grid.Rows[row].Cells["colAddress"].Value = "";
-                        grid.Rows[row].Cells["colValue"].Value = "--- " + s.Name + " (FC" + FunctionName(fc) + " " + start + ".." + (start + qty - 1) + ") ---";
-                        grid.Rows[row].Cells["colDef"].Value = "";
-                        grid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
-                        grid.Rows[row].DefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
-                    });
+                        if (!client.IsConnected) break;
+                        client.UnitId = (byte)unit;
+                        bool deviceSeen = false;
 
-                    // Okuma: ModbusClient.ReadTolerant kullan
-                    int timeoutMs;
-                    if (!int.TryParse(txtTimeout.Text.Trim(), out timeoutMs) || timeoutMs < 100) timeoutMs = 2000;
-                    RegisterRead read = Client.ReadTolerant(fc, start, qty, timeoutMs);
-                    if (read == null)
-                    {
-                        Ui(delegate
+                        for (int i = 0; i < _scanSegments.Count; i++)
                         {
-                            int row = grid.Rows.Add();
-                            grid.Rows[row].Cells["colIndex"].Value = "";
-                            grid.Rows[row].Cells["colAddress"].Value = start;
-                            grid.Rows[row].Cells["colValue"].Value = "okunmadi (bağlantı yok)";
-                            grid.Rows[row].DefaultCellStyle.ForeColor = Color.Red;
-                        });
-                        continue;
-                    }
+                            ScanSegment s = _scanSegments[i];
+                            if (!s.Enabled) continue;
 
-                    int errors = read.ErrorCount;
-                    for (int r = 0; r < qty; r++)
-                    {
-                        int addr = start + r;
-                        string valText;
-                        string errorText = null;
-                        if (read.ItemErrors != null && r < read.ItemErrors.Length)
-                        {
-                            errorText = read.ItemErrors[r];
-                        }
-                        if (errorText != null)
-                        {
-                            valText = errorText;
-                        }
-                        else
-                        {
-                            valText = ValueOf(read, r, fc == 1 || fc == 2, decodeIdx, (WordOrder)wordIdx);
-                        }
+                            byte fc = s.Function;
+                            int start = s.StartAddress;
+                            int qty = s.Quantity;
+                            int decodeIdx = s.DecodeIndex;
+                            int wordIdx = s.WordOrderIndex;
+                            bool show4xx = s.Show4xx;
 
-                        Ui(delegate
-                        {
-                            int row = grid.Rows.Add();
-                            grid.Rows[row].Cells["colIndex"].Value = "";
-                            grid.Rows[row].Cells["colAddress"].Value = show4xx ? ModbusTcpClient.DisplayAddress(fc, addr, true).ToString() : addr.ToString();
-                            grid.Rows[row].Cells["colValue"].Value = valText;
-                            string def = DefinitionOf(fc, addr);
-                            if (def.Length > 0) grid.Rows[row].Cells["colDef"].Value = def;
-                            if (errorText != null)
+                            // Keşif: tek register probe. Yanıt yoksa bu ID'de cihaz yok demektir.
+                            if (!client.Probe(fc, start, scanMs)) continue;
+
+                            if (!deviceSeen)
                             {
-                                grid.Rows[row].Cells["colValue"].Style.ForeColor = Color.Red;
-                                grid.Rows[row].Cells["colValue"].ToolTipText = errorText;
+                                deviceSeen = true;
+                                found++;
+                                int foundNow = found;
+                                int unitNow = unit;
+                                Ui(delegate
+                                {
+                                    int row = scanResultGrid.Rows.Add();
+                                    scanResultGrid.Rows[row].Cells["rDevice"].Value = "ID " + unitNow;
+                                    scanResultGrid.Rows[row].Cells["rValue"].Value = "--- cihaz bulundu (" + foundNow + ".) ---";
+                                    scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
+                                    scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
+                                });
+                                Log("Cihaz bulundu: ID " + unit);
                             }
-                        });
 
-                        overallDone++;
-                        if (overallDone % 20 == 0)
-                        {
-                            int finalOverall = overallDone;
-                            Ui(delegate { lblSummary.Text = "Tarama: " + finalOverall + " / " + totalExpected + " kayıt"; });
+                            int readMs = Math.Max(scanMs, 1000);
+                            RegisterRead read = client.ReadTolerant(fc, start, qty, readMs);
+                            if (read == null) continue;
+
+                            Ui(delegate
+                            {
+                                int row = scanResultGrid.Rows.Add();
+                                scanResultGrid.Rows[row].Cells["rValue"].Value = "--- " + s.Name + " (FC" + FunctionName(fc) + " " + start + ".." + (start + qty - 1) + ") ---";
+                                scanResultGrid.Rows[row].DefaultCellStyle.ForeColor = Color.DimGray;
+                            });
+
+                            for (int r = 0; r < qty; r++)
+                            {
+                                int addr = start + r;
+                                string errorText = null;
+                                if (read.ItemErrors != null && r < read.ItemErrors.Length)
+                                    errorText = read.ItemErrors[r];
+                                string valText = errorText != null
+                                    ? errorText
+                                    : ValueOf(read, r, fc == 1 || fc == 2, decodeIdx, (WordOrder)wordIdx);
+                                string addrText = show4xx ? ModbusTcpClient.DisplayAddress(fc, addr, true).ToString() : addr.ToString();
+                                string def = DefinitionOf(fc, addr);
+
+                                Ui(delegate
+                                {
+                                    int row = scanResultGrid.Rows.Add();
+                                    scanResultGrid.Rows[row].Cells["rAddress"].Value = addrText;
+                                    scanResultGrid.Rows[row].Cells["rValue"].Value = valText;
+                                    if (def.Length > 0) scanResultGrid.Rows[row].Cells["rDef"].Value = def;
+                                    if (errorText != null)
+                                    {
+                                        scanResultGrid.Rows[row].Cells["rValue"].Style.ForeColor = Color.Red;
+                                        scanResultGrid.Rows[row].Cells["rValue"].ToolTipText = errorText;
+                                    }
+                                });
+                            }
                         }
+
+                        scanned++;
+                        int scannedNow = scanned;
+                        int foundNow2 = found;
+                        int unitNow2 = unit;
+                        Ui(delegate
+                        {
+                            lblSummary.Text = "Tarama: ID " + unitNow2 + "/" + uEnd + " — " + foundNow2 + " cihaz bulundu";
+                        });
                     }
+                }
+                finally
+                {
+                    client.UnitId = origUnit;
                 }
 
                 Ui(delegate
                 {
                     btnScanRun.Enabled = true;
                     btnScanRun.Text = "TARA";
-                    btnRead.Enabled = Client.IsConnected;
-                    lblSummary.Text = "Tarama tamamlandı: " + overallDone + " kayıt" + (totalExpected > overallDone ? " (bazı hatalı)" : "");
-                    Log("Tarama bitti: " + overallDone + " / " + totalExpected + " kayıt");
+                    btnRead.Enabled = client.IsConnected;
+                    lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı)";
+                    Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID");
                 });
             });
             worker.IsBackground = true;
@@ -1650,6 +1748,7 @@ namespace ModbusScan
 
         private void ShowRead(RegisterRead read)
         {
+            ShowScanResults(false);
             grid.SuspendLayout();
             grid.Rows.Clear();
 
@@ -2019,6 +2118,8 @@ namespace ModbusScan
         {
             _lastRead = null;
             grid.Rows.Clear();
+            scanResultGrid.Rows.Clear();
+            ShowScanResults(false);
             txtLog.Clear();
             lblSummary.Text = "—";
         }

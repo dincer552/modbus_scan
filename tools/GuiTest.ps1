@@ -781,6 +781,19 @@ function Read-Reg($Form, [int]$Addr) {
     return ([int]$r.Data[0] -shl 8) -bor [int]$r.Data[1]
 }
 
+function Get-ScanRows($Form) {
+    $g = Get-Field $Form 'scanResultGrid'
+    $rows = @()
+    foreach ($row in $g.Rows) {
+        $cells = @()
+        foreach ($col in @('rDevice', 'rAddress', 'rValue', 'rDef')) {
+            $cells += [string]$row.Cells[$col].Value
+        }
+        $rows += ($cells -join ' | ')
+    }
+    return $rows
+}
+
 $scan = [Activator]::CreateInstance($type)
 $scan.Show()
 (Get-Field $scan 'txtIp').Text = '127.0.0.1'
@@ -807,16 +820,28 @@ Assert ((Get-Field $scan 'grid').Top -gt (Get-Field $scan 'gbScan').Bottom -and
     'panel acikken serit ve tablo asagi kayiyor, cakisma yok' `
     ('panelAlt=' + (Get-Field $scan 'gbScan').Bottom + ' tabloUst=' + (Get-Field $scan 'grid').Top)
 
+(Get-Field $scan 'txtScanUnitStart').Text = '1'
+(Get-Field $scan 'txtScanUnitEnd').Text = '3'
+(Get-Field $scan 'txtScanTimeout').Text = '300'
 Invoke-Handler $scan 'OnScanRun'
 $waited = 0
-while (-not (Get-Field $scan 'btnScanRun').Enabled -and $waited -lt 10000) {
+while (-not (Get-Field $scan 'btnScanRun').Enabled -and $waited -lt 20000) {
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 50
     $waited += 50
 }
-$scanRows = @(Get-GridRows $scan)
-Assert ($scanRows.Count -eq 6 -and $scanRows[0] -like '*--- Segment1*') `
-    'TARA: baslik satiri + 5 kayit ana tabloya yazildi' ('satir=' + $scanRows.Count + ' ilk=' + $scanRows[0])
+$scanRows = @(Get-ScanRows $scan)
+Assert ($scanRows.Count -eq 7 -and $scanRows[0] -like 'ID 1*cihaz bulundu*') `
+    'TARA: bulunan cihaz basligi + segment + 5 kayit sonuc tablosunda' ('satir=' + $scanRows.Count + ' ilk=' + $scanRows[0])
+Assert ((Visible $scan 'scanResultGrid') -and -not (Visible $scan 'grid') -and (Visible $scan 'btnScanBack')) `
+    'tarama sonuclari gosterilirken normal register tablosu gizli' 'gorunurluk yanlis'
+Assert ([string](Get-Field $scan 'lblSummary').Text -like '*1 cihaz bulundu*3 ID*') `
+    'ozet: kac cihaz bulundugu ve taranan ID sayisi' ([string](Get-Field $scan 'lblSummary').Text)
+Assert ((Get-Field $scan '_tcp').UnitId -eq 1) 'tarama sonrasi unite id eski degerine donuyor' `
+    ([string](Get-Field $scan '_tcp').UnitId)
+Invoke-Handler $scan 'OnScanBack'
+Assert ((Visible $scan 'grid') -and -not (Visible $scan 'scanResultGrid')) `
+    'Tabloya don: register tablosu geri geliyor' 'geri donus bozuk'
 
 $scan2 = [Activator]::CreateInstance($type)
 $scan2.Show()

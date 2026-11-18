@@ -195,6 +195,28 @@ namespace ModbusScan
             return BuildRead(functionCode, startAddress, quantity, data, requests, bits, errors, null);
         }
 
+        /// <summary>
+        /// Cihaz keşfi: tek register okur. Herhangi bir yanıt (Modbus hata kodu dahil) cihazın
+        /// var olduğunu gösterir ve true döner; yanıtsızlık/bağlantı sorunu false döner.
+        /// </summary>
+        public bool Probe(byte functionCode, int startAddress, int timeoutMs)
+        {
+            if (!IsConnected) return false;
+            try
+            {
+                ReadChunk(functionCode, startAddress, 1, timeoutMs);
+                return true;
+            }
+            catch (ModbusException)
+            {
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         private void ValidateRange(int startAddress, int quantity)
         {
             if (!IsConnected) throw new InvalidOperationException("Baglanti yok.");

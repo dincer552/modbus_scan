@@ -128,6 +128,9 @@ try {
                 $qty = ([int]$pdu[3] -shl 8) -bor [int]$pdu[4]
                 Write-Host ("REQ unit={0} fc={1} addr={2} qty={3}" -f $unit, $fc, $addr, $qty)
 
+                # Gercek bus davranisi: baska unit id'ye gelen istege yanit verilmez (cihaz kesfi testi).
+                if ($unit -ne $UnitId) { continue }
+
                 $resp = $null
                 $silent = $false
                 if ($fc -in 1, 2, 3, 4 -and $addr -ge 60000 -and $addr -lt 60100) {
