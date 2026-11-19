@@ -900,6 +900,37 @@ Assert ($stopChecks2[0].Checked -and $stopChecks2[2].Checked -and -not $stopChec
 Set-Combo $sc2 'cmbMode' 0
 Close-Form $sc2
 
+# --- Segmentsiz tarama: tablo bosken TARA sadece "cihaz yanit veriyor mu" kontrolu yapar ---
+$po = [Activator]::CreateInstance($type)
+$po.Show()
+(Get-Field $po 'txtIp').Text = '127.0.0.1'
+(Get-Field $po 'txtPort').Text = "$Port"
+(Get-Field $po 'txtUnit').Text = '1'
+(Get-Field $po 'txtTimeout').Text = '2000'
+Invoke-Handler $po 'OnConnect'
+$segsList = $po.GetType().GetField('_scanSegments', $flags).GetValue($po)
+$segsList.Clear()
+(Get-Field $po 'scanGrid').RowCount = 0
+Invoke-Method $po 'SaveScanPlan' @()
+Invoke-Method $po 'UpdateScanPanelSize' @()
+Assert ((Get-Field $po 'scanGrid').RowCount -eq 0) 'segmentsiz tarama: plan bosaltildi' 'segment kaldi'
+(Get-Field $po 'txtScanUnitStart').Text = '1'
+(Get-Field $po 'txtScanUnitEnd').Text = '3'
+(Get-Field $po 'txtScanTimeout').Text = '300'
+Invoke-Handler $po 'OnScanRun'
+$waited = 0
+while (-not (Get-Field $po 'btnScanRun').Enabled -and $waited -lt 20000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 50
+    $waited += 50
+}
+$poRows = @(Get-ScanRows $po)
+Assert ($poRows.Count -eq 1 -and $poRows[0] -like 'ID 1*cihaz bulundu*') `
+    'segmentsiz TARA: sadece cihaz basligi (register okumadan)' ('satir=' + $poRows.Count + ' ilk=' + $poRows[0])
+Assert ([string](Get-Field $po 'lblSummary').Text -like '*1 cihaz bulundu*3 ID*') `
+    'segmentsiz ozet: 1 cihaz / 3 ID' ([string](Get-Field $po 'lblSummary').Text)
+Close-Form $po
+
 # --- EBM fan adresleme: %25 start, adres kaydi, geri donus (yalnizca sahte sunucuya yazilir) ---
 $ebm = [Activator]::CreateInstance($type)
 $ebm.Show()

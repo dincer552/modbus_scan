@@ -1120,13 +1120,6 @@ namespace ModbusScan
                 lblSummary.Text = "Önce Bağlan butonuyla bağlantı kurun.";
                 return;
             }
-            int enabled = 0;
-            for (int i = 0; i < _scanSegments.Count; i++) if (_scanSegments[i].Enabled) enabled++;
-            if (enabled == 0)
-            {
-                lblSummary.Text = "Tarama için en az bir segment işaretli olmalı.";
-                return;
-            }
             int uStart, uEnd, scanMs;
             if (!int.TryParse(txtScanUnitStart.Text.Trim(), out uStart) || uStart < 1 || uStart > 247)
             {
@@ -1179,6 +1172,8 @@ namespace ModbusScan
                 byte origUnit = client.UnitId;
                 int found = 0;
                 int scanned = 0;
+                bool presenceOnly = true;
+                for (int i = 0; i < _scanSegments.Count; i++) if (_scanSegments[i].Enabled) { presenceOnly = false; break; }
                 try
                 {
                     for (int ci = 0; ci < comboCount; ci++)
@@ -1216,7 +1211,14 @@ namespace ModbusScan
                             client.UnitId = (byte)unit;
                             bool deviceSeen = false;
 
-                            for (int i = 0; i < _scanSegments.Count; i++)
+                            if (presenceOnly && ProbeAny(client, scanMs))
+                            {
+                                deviceSeen = true;
+                                found++;
+                                AddScanDeviceHeader(unit, found, comboLabel);
+                            }
+
+                            for (int i = 0; !presenceOnly && i < _scanSegments.Count; i++)
                             {
                                 ScanSegment s = _scanSegments[i];
                                 if (!s.Enabled) continue;
@@ -1234,20 +1236,7 @@ namespace ModbusScan
                                 {
                                     deviceSeen = true;
                                     found++;
-                                    int foundNow = found;
-                                    int unitNow = unit;
-                                    string cl = comboLabel;
-                                    Ui(delegate
-                                    {
-                                        int row = scanResultGrid.Rows.Add();
-                                        scanResultGrid.Rows[row].Cells["rDevice"].Value = "ID " + unitNow;
-                                        string hdr = "--- cihaz bulundu (" + foundNow + ".) ---";
-                                        if (cl.Length > 0) hdr = "--- cihaz bulundu (" + foundNow + ".) [" + cl + "] ---";
-                                        scanResultGrid.Rows[row].Cells["rValue"].Value = hdr;
-                                        scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
-                                        scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
-                                    });
-                                    Log("Cihaz bulundu: ID " + unit + (comboLabel.Length > 0 ? " @ " + comboLabel : ""));
+                                    AddScanDeviceHeader(unit, found, comboLabel);
                                 }
 
                                 int readMs = Math.Max(scanMs, 1000);
@@ -1323,6 +1312,30 @@ namespace ModbusScan
             });
             worker.IsBackground = true;
             worker.Start();
+        }
+
+        /// <summary>Segment yokken "herhangi bir veri geliyor mu" kontrolü: FC03/04/01/02 @0 probe, ilk yanıtta durur.</summary>
+        private static bool ProbeAny(ModbusClient client, int scanMs)
+        {
+            byte[] fcs = { 3, 4, 1, 2 };
+            for (int i = 0; i < fcs.Length; i++)
+                if (client.Probe(fcs[i], 0, scanMs)) return true;
+            return false;
+        }
+
+        private void AddScanDeviceHeader(int unit, int foundNow, string comboLabel)
+        {
+            Ui(delegate
+            {
+                int row = scanResultGrid.Rows.Add();
+                scanResultGrid.Rows[row].Cells["rDevice"].Value = "ID " + unit;
+                string hdr = "--- cihaz bulundu (" + foundNow + ".) ---";
+                if (comboLabel.Length > 0) hdr = "--- cihaz bulundu (" + foundNow + ".) [" + comboLabel + "] ---";
+                scanResultGrid.Rows[row].Cells["rValue"].Value = hdr;
+                scanResultGrid.Rows[row].DefaultCellStyle.BackColor = Color.LightGray;
+                scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
+            });
+            Log("Cihaz bulundu: ID " + unit + (comboLabel.Length > 0 ? " @ " + comboLabel : ""));
         }
 
         private const string ShortcutName = "Modbus Scan.lnk";
