@@ -668,7 +668,7 @@ namespace ModbusScan
             txtScanUnitEnd = MakeTextBox("247", 78, 0, 40);
             scanOptions.Controls.Add(txtScanUnitEnd);
             scanOptions.Controls.Add(MakeLabel("ms", 124, 4));
-            txtScanTimeout = MakeTextBox("300", 142, 0, 44);
+            txtScanTimeout = MakeTextBox("150", 142, 0, 44);
             scanOptions.Controls.Add(txtScanTimeout);
             Label lblScanHint = MakeLabel("cihaz keşfi: bu ID aralığı taranır", 196, 4);
             lblScanHint.ForeColor = Color.DimGray;
@@ -1141,7 +1141,7 @@ namespace ModbusScan
                 lblSummary.Text = "ID bitiş, başlangıçtan küçük olamaz (1..247).";
                 return;
             }
-            if (!int.TryParse(txtScanTimeout.Text.Trim(), out scanMs) || scanMs < 50) scanMs = 300;
+            if (!int.TryParse(txtScanTimeout.Text.Trim(), out scanMs) || scanMs < 50) scanMs = 150;
 
             bool rtu = SelectedIsRtu();
             List<SerialCombo> combos = null;

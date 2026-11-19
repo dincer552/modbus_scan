@@ -112,7 +112,7 @@ Okuma kutusunun altındaki **Tarama** düğmesi paneli açar/kapatır (kayıtlı
 
 **Ekle** butonu mevcut bağlantı/okuma ayarlarından bir segment önerir; **Sil** seçili satırı kaldırır; plan `%APPDATA%\ModbusScan\scanplan.txt` dosyasına otomatik kaydedilir, program açılışında geri yüklenir.
 
-**Cihaz keşfi seçenekleri** (segment listesinin altındaki satır): `ID 1 – 247` taranacak ünite (slave) adres aralığı, `ms` keşif zaman aşımı (varsayılan 300). TARAMA sırasında her ID için önce tek register'lık bir **probe** gönderilir: yanıt gelirse (Modbus hata kodu dahil) cihaz **var** kabul edilir, gelmezse o ID atlanır. Böylece hattaki tüm cihazlar bulunur.
+**Cihaz keşfi seçenekleri** (segment listesinin altındaki satır): `ID 1 – 247` taranacak ünite (slave) adres aralığı, `ms` keşif zaman aşımı (varsayılan **150** — daha düşük = daha hızlı tarama, ancak çok yavaş cihazlar kaçabilir). TARAMA sırasında her ID için önce tek register'lık bir **probe** gönderilir: yanıt gelirse (Modbus hata kodu dahil) cihaz **var** kabul edilir, gelmezse o ID atlanır. Böylece hattaki tüm cihazlar bulunur.
 
 **Segmentsiz (sadece var/yok) tarama**: Segment tablosu **boşsa** TARA register okumaz; her ID + seri kombinasyon için yalnızca "herhangi bir veri geliyor mu" diye bakar (FC03/04/01/02 @0 probe, ilk yanıtta durur) ve yanıt veren cihazları `ID n — cihaz bulundu` başlığıyla listeler. Tabloyu doldurmak zorunda değilsin. Tabloda işaretli segment **varsa** ek olarak o aralıklar okunup register satırları da yazılır.
 
