@@ -912,9 +912,10 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                Client.WriteSingleRegister(257, 1, timeoutMs);      // D101: setpoint kaynağı = RS485
-                Client.WriteSingleRegister(1, 16000, timeoutMs);    // D001: 16000/64000 = %25
-                EbmStatus("D101=1 (RS485), D001=16000 (%25 start). Fan dönmeye başlamalı.");
+                Client.WriteSingleRegister(257, 1, timeoutMs);      // D101: setpoint kaynağı = RS485 (Modbus kontrol)
+                Client.WriteSingleRegister(15, 1, timeoutMs);       // D00F: Enable / Disable = enable (1), yoksa fan dönmez
+                Client.WriteSingleRegister(1, 16000, timeoutMs);    // D001: 16000/64000 = %25 (4 LSB yoksayılır)
+                EbmStatus("D101=1 (RS485), D00F=1 (Enable), D001=16000 (%25 start). Fan dönmeye başlamalı.");
                 EbmStatus("Gözle kontrol edin: dönüyorsa adresi girip Kaydet + Bitir'e basın.");
                 try
                 {
@@ -959,8 +960,9 @@ namespace ModbusScan
                 }
 
                 StoreDefinition(3, 256, "EBM fan adresi (D100)");
-                StoreDefinition(3, 1, "EBM setpoint (D001) 0..64000, %25=16000");
+                StoreDefinition(3, 1, "EBM setpoint (D001) 0..64000, %25=16000 (D00F Enable=1 gerekli)");
                 StoreDefinition(3, 257, "EBM setpoint kaynağı (D101) 1=RS485");
+                StoreDefinition(3, 15, "EBM enable/disable (D00F) 0=durdur, 1=çalıştır");
                 StoreDefinition(3, 12, "EBM adresleme aç/kapa (D00C)");
                 StoreDefinition(3, 8, "EBM anlık hız (D008) rpm");
                 SaveDefinitions();
