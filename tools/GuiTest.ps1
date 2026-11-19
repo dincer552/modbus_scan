@@ -826,13 +826,16 @@ Assert ((Get-Field $scan 'grid').Top -gt (Get-Field $scan 'gbScan').Bottom -and
 Invoke-Handler $scan 'OnScanRun'
 $waited = 0
 $liveSeen = $false
+$stopBtnSeen = $false
 while (-not (Get-Field $scan 'btnScanRun').Enabled -and $waited -lt 20000) {
     [System.Windows.Forms.Application]::DoEvents()
     if ([string](Get-Field $scan 'lblScanLive').Text -like '*Taran*TCP*ID*') { $liveSeen = $true }
+    if ((Get-Field $scan 'btnScanStop').Visible) { $stopBtnSeen = $true }
     Start-Sleep -Milliseconds 50
     $waited += 50
 }
 Assert $liveSeen 'canli satir tarama sirasinda mod + ID gosteriyor' 'gorulmedi'
+Assert $stopBtnSeen 'durdur dugmesi tarama sirasinda gorunur' 'gorunmedi'
 $scanRows = @(Get-ScanRows $scan)
 Assert ($scanRows.Count -eq 7 -and $scanRows[0] -like 'ID 1*cihaz bulundu*') `
     'TARA: bulunan cihaz basligi + segment + 5 kayit sonuc tablosunda' ('satir=' + $scanRows.Count + ' ilk=' + $scanRows[0])
@@ -842,6 +845,10 @@ Assert ([string](Get-Field $scan 'lblSummary').Text -like '*1 cihaz bulundu*3 ID
     'ozet: kac cihaz bulundugu ve taranan ID sayisi' ([string](Get-Field $scan 'lblSummary').Text)
 Assert ([string](Get-Field $scan 'lblScanLive').Text -like '*Tarama bitti*1 cihaz*3 ID*') `
     'alt canli satir: bitis ozeti' ([string](Get-Field $scan 'lblScanLive').Text)
+Assert (-not (Visible $scan 'btnScanStop')) `
+    'durdur dugmesi tarama bitince gizlenir' 'gorunur kaldi'
+Assert ((Visible $scan 'btnScanRun')) `
+    'tara dugmesi tarama bitince tekrar gorunur' 'gizli kaldi'
 Assert ((Get-Field $scan '_tcp').UnitId -eq 1) 'tarama sonrasi unite id eski degerine donuyor' `
     ([string](Get-Field $scan '_tcp').UnitId)
 Invoke-Handler $scan 'OnScanBack'

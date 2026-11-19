@@ -44,7 +44,7 @@ namespace ModbusScan
         // Tarama planı
         private GroupBox gbScan;
         private DataGridView scanGrid;
-        private Button btnScanAdd, btnScanRemove, btnScanRun;
+        private Button btnScanAdd, btnScanRemove, btnScanRun, btnScanStop;
         private DataGridView scanResultGrid;
         private Button btnScanBack;
         private Panel scanOptions;
@@ -99,6 +99,7 @@ namespace ModbusScan
             }
         }
         private readonly List<ScanSegment> _scanSegments = new List<ScanSegment>();
+        private volatile bool _scanStopRequested;
 
         // EBM fan adresleme
         private GroupBox gbEbm;
@@ -651,6 +652,15 @@ namespace ModbusScan
             btnScanRun.ForeColor = Color.White;
             btnScanRun.Click += OnScanRun;
 
+            btnScanStop = new Button();
+            btnScanStop.Text = "DURDUR";
+            btnScanStop.SetBounds(392, 70, 84, 28);
+            btnScanStop.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanStop.BackColor = Color.FromArgb(128, 0, 0);
+            btnScanStop.ForeColor = Color.White;
+            btnScanStop.Visible = false;
+            btnScanStop.Click += OnScanStop;
+
             btnScanBack = new Button();
             btnScanBack.Text = "Tabloya dön";
             btnScanBack.SetBounds(392, 102, 84, 23);
@@ -727,6 +737,7 @@ namespace ModbusScan
             gbScan.Controls.Add(btnScanAdd);
             gbScan.Controls.Add(btnScanRemove);
             gbScan.Controls.Add(btnScanRun);
+            gbScan.Controls.Add(btnScanStop);
             gbScan.Controls.Add(btnScanBack);
 
             // Tarama sonuçları tablosu: normal register tablosunun yerini alır.
@@ -1201,7 +1212,19 @@ namespace ModbusScan
 
             scanResultGrid.Rows.Clear();
             ShowScanResults(true);
+            _scanStopRequested = false;
+            btnScanRun.Visible = false;
+            btnScanRun.Enabled = false;
+            btnScanStop.Visible = true;
+            btnScanStop.Enabled = true;
             RunScanAsync(uStart, uEnd, scanMs, rtu, combos);
+        }
+
+        private void OnScanStop(object sender, EventArgs e)
+        {
+            _scanStopRequested = true;
+            btnScanStop.Enabled = false;
+            lblSummary.Text = "Tarama durduruluyor...";
         }
 
         private void RunScanAsync(int uStart, int uEnd, int scanMs, bool rtu, List<SerialCombo> combos)
@@ -1227,12 +1250,14 @@ namespace ModbusScan
                 byte origUnit = client.UnitId;
                 int found = 0;
                 int scanned = 0;
+                bool stopped = false;
                 bool presenceOnly = true;
                 for (int i = 0; i < _scanSegments.Count; i++) if (_scanSegments[i].Enabled) { presenceOnly = false; break; }
                 try
                 {
                     for (int ci = 0; ci < comboCount; ci++)
                     {
+                        if (_scanStopRequested) { stopped = true; break; }
                         string comboLabel = "";
                         if (rtu && combos != null)
                         {
@@ -1262,6 +1287,7 @@ namespace ModbusScan
 
                         for (int unit = uStart; unit <= uEnd; unit++)
                         {
+                            if (_scanStopRequested) { stopped = true; break; }
                             if (!client.IsConnected) break;
                             client.UnitId = (byte)unit;
                             bool deviceSeen = false;
@@ -1362,11 +1388,22 @@ namespace ModbusScan
                 {
                     btnScanRun.Enabled = true;
                     btnScanRun.Text = "TARA";
+                    btnScanRun.Visible = true;
+                    btnScanStop.Visible = false;
                     btnRead.Enabled = client.IsConnected;
                     string comboNote = comboCount > 1 ? ", " + comboCount + " kombinasyon" : "";
-                    lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı" + comboNote + ")";
-                    lblScanLive.Text = "Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote;
-                    Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote);
+                    if (stopped)
+                    {
+                        lblSummary.Text = "Tarama durduruldu: " + found + " cihaz bulundu (" + scanned + " ID tarandı" + comboNote + ")";
+                        lblScanLive.Text = "Tarama durduruldu: " + found + " cihaz / " + scanned + " ID" + comboNote;
+                        Log("Tarama durduruldu: " + found + " cihaz / " + scanned + " ID" + comboNote);
+                    }
+                    else
+                    {
+                        lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı" + comboNote + ")";
+                        lblScanLive.Text = "Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote;
+                        Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote);
+                    }
                 });
             });
             worker.IsBackground = true;
