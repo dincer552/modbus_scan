@@ -2,8 +2,8 @@
 using System.Reflection;
 using System.Windows.Forms;
 
-[assembly: AssemblyVersion("0.19.0")]
-[assembly: AssemblyFileVersion("0.19.0")]
+[assembly: AssemblyVersion("0.20.0")]
+[assembly: AssemblyFileVersion("0.20.0")]
 [assembly: AssemblyTitle("Modbus Test")]
 [assembly: AssemblyProduct("ModbusScan")]
 

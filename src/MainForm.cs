@@ -105,9 +105,8 @@ namespace ModbusScan
         private GroupBox gbEbm;
         private Button btnScanToggle;
         private Button btnEbmEnter, btnEbmBack, btnEbmStart25, btnEbmSaveAddr;
-        private TextBox txtEbmStatus, txtEbmFoundAddr, txtEbmSifre;
-        private CheckBox chkEbmFc16;
-        private Label lblEbmAddr, lblEbmSifre;
+        private TextBox txtEbmStatus, txtEbmFoundAddr;
+        private Label lblEbmAddr;
 
         // Ayar kalıcılığı
         private static string SettingsPath()
@@ -781,7 +780,7 @@ namespace ModbusScan
         {
             gbEbm = new GroupBox();
             gbEbm.Text = "EBM Fan Adresleme";
-            gbEbm.SetBounds(8, 224, 484, 142);
+            gbEbm.SetBounds(8, 224, 484, 118);
             gbEbm.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbEbm.Visible = false;
 
@@ -811,18 +810,6 @@ namespace ModbusScan
             btnEbmBack.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
-
-            chkEbmFc16 = new CheckBox();
-            chkEbmFc16.Text = "FC16 ile yaz";
-            chkEbmFc16.SetBounds(10, 82, 72, 18);
-            chkEbmFc16.AutoSize = false;
-            gbEbm.Controls.Add(chkEbmFc16);
-
-            lblEbmSifre = MakeLabel("Şifre (D002-D004)", 96, 84);
-            gbEbm.Controls.Add(lblEbmSifre);
-
-            txtEbmSifre = MakeTextBox("", 166, 80, 44);
-            gbEbm.Controls.Add(txtEbmSifre);
 
             txtEbmStatus = new TextBox();
             txtEbmStatus.SetBounds(10, 50, 462, 28);
@@ -932,27 +919,7 @@ namespace ModbusScan
 
         private void EbmWriteReg(int address, int value, int timeoutMs)
         {
-            if (chkEbmFc16 != null && chkEbmFc16.Checked)
-            {
-                byte[] data = new byte[] { (byte)((value >> 8) & 0xFF), (byte)(value & 0xFF) };
-                Client.WriteMultipleRegisters(address, data, timeoutMs);
-            }
-            else
-            {
-                Client.WriteSingleRegister(address, value, timeoutMs);
-            }
-        }
-
-        private void EbmWritePassword(int timeoutMs)
-        {
-            if (txtEbmSifre == null) return;
-            string s = txtEbmSifre.Text.Trim();
-            if (s.Length == 0) return;
-            int pwd;
-            if (!int.TryParse(s, out pwd)) return;
-            EbmWriteReg(2, pwd, timeoutMs);   // D002
-            EbmWriteReg(3, pwd, timeoutMs);   // D003
-            EbmWriteReg(4, pwd, timeoutMs);   // D004
+            Client.WriteSingleRegister(address, value, timeoutMs);
         }
 
         private void OnEbmStart25(object sender, EventArgs e)
@@ -961,7 +928,6 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                EbmWritePassword(timeoutMs);
                 EbmWriteReg(257, 1, timeoutMs);      // D101: setpoint kaynağı = RS485 (Modbus kontrol)
                 EbmStatus("D101=1 (RS485) yazıldı.");
                 EbmWriteReg(15, 1, timeoutMs);       // D00F: Enable / Disable = enable (1), yoksa fan dönmez
@@ -995,7 +961,6 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                EbmWritePassword(timeoutMs);
                 EbmWriteReg(256, addr, timeoutMs);   // D100: fan adresi
                 EbmWriteReg(12, 0, timeoutMs);       // D00C: adresleme kapalı (adres D100'e işlenir)
                 EbmWriteReg(257, 1, timeoutMs);      // D101: kaynak RS485
