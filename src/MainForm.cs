@@ -25,6 +25,7 @@ namespace ModbusScan
         private CheckBox chkConvention;
         private Button btnConnect, btnDisconnect, btnRead, btnClear;
         private Label lblStatus, lblSummary;
+        private Label lblScanLive;
         private Label lblUpdate;
         private Button btnCheckUpdate, btnUpdate;
         private Timer updateTimer;
@@ -533,6 +534,14 @@ namespace ModbusScan
             txtLog.BackColor = Color.White;
             txtLog.Font = new Font("Consolas", 8.25f);
 
+            // Alt canlı tarama satırı: o an hangi mod/kombinasyon ve hangi ID/adres taranıyor.
+            lblScanLive = new Label();
+            lblScanLive.SetBounds(8, 486, 484, 14);
+            lblScanLive.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            lblScanLive.Font = new Font("Segoe UI", 8.25f);
+            lblScanLive.ForeColor = Color.FromArgb(0, 90, 158);
+            lblScanLive.Text = "";
+
             Controls.Add(gbConnection);
             Controls.Add(gbRead);
             Controls.Add(btnScanToggle);
@@ -545,6 +554,7 @@ namespace ModbusScan
             Controls.Add(grid);
             Controls.Add(scanResultGrid);
             Controls.Add(txtLog);
+            Controls.Add(lblScanLive);
 
             UpdateDecodeControls();
             AcceptButton = btnRead;
@@ -1165,6 +1175,7 @@ namespace ModbusScan
             int connTimeout;
             if (!int.TryParse(txtTimeout.Text.Trim(), out connTimeout) || connTimeout < 100) connTimeout = 2000;
             int comboCount = (combos != null) ? combos.Count : 1;
+            string modeText = rtu ? "RS485" : "TCP";
 
             System.Threading.Thread worker = new System.Threading.Thread(delegate()
             {
@@ -1210,6 +1221,8 @@ namespace ModbusScan
                             if (!client.IsConnected) break;
                             client.UnitId = (byte)unit;
                             bool deviceSeen = false;
+                            string liveBase = modeText + (comboLabel.Length > 0 ? " " + comboLabel : "") + " — ID " + unit + "/" + uEnd;
+                            if (presenceOnly) SetScanLive("Taranıyor: " + liveBase + " (var/yok: FC03/04/01/02 @0)");
 
                             if (presenceOnly && ProbeAny(client, scanMs))
                             {
@@ -1230,6 +1243,7 @@ namespace ModbusScan
                                 int wordIdx = s.WordOrderIndex;
                                 bool show4xx = s.Show4xx;
 
+                                SetScanLive("Taranıyor: " + liveBase + " FC" + FunctionName(fc) + " adres " + start + ".." + (start + qty - 1));
                                 if (!client.Probe(fc, start, scanMs)) continue;
 
                                 if (!deviceSeen)
@@ -1307,6 +1321,7 @@ namespace ModbusScan
                     btnRead.Enabled = client.IsConnected;
                     string comboNote = comboCount > 1 ? ", " + comboCount + " kombinasyon" : "";
                     lblSummary.Text = "Tarama tamamlandı: " + found + " cihaz bulundu (" + scanned + " ID tarandı" + comboNote + ")";
+                    lblScanLive.Text = "Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote;
                     Log("Tarama bitti: " + found + " cihaz / " + scanned + " ID" + comboNote);
                 });
             });
@@ -1336,6 +1351,11 @@ namespace ModbusScan
                 scanResultGrid.Rows[row].DefaultCellStyle.Font = new Font(scanResultGrid.Font, FontStyle.Bold);
             });
             Log("Cihaz bulundu: ID " + unit + (comboLabel.Length > 0 ? " @ " + comboLabel : ""));
+        }
+
+        private void SetScanLive(string text)
+        {
+            Ui(delegate { lblScanLive.Text = text; });
         }
 
         private const string ShortcutName = "Modbus Scan.lnk";

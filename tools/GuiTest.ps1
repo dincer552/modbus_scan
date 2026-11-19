@@ -825,11 +825,14 @@ Assert ((Get-Field $scan 'grid').Top -gt (Get-Field $scan 'gbScan').Bottom -and
 (Get-Field $scan 'txtScanTimeout').Text = '300'
 Invoke-Handler $scan 'OnScanRun'
 $waited = 0
+$liveSeen = $false
 while (-not (Get-Field $scan 'btnScanRun').Enabled -and $waited -lt 20000) {
     [System.Windows.Forms.Application]::DoEvents()
+    if ([string](Get-Field $scan 'lblScanLive').Text -like '*Taran*TCP*ID*') { $liveSeen = $true }
     Start-Sleep -Milliseconds 50
     $waited += 50
 }
+Assert $liveSeen 'canli satir tarama sirasinda mod + ID gosteriyor' 'gorulmedi'
 $scanRows = @(Get-ScanRows $scan)
 Assert ($scanRows.Count -eq 7 -and $scanRows[0] -like 'ID 1*cihaz bulundu*') `
     'TARA: bulunan cihaz basligi + segment + 5 kayit sonuc tablosunda' ('satir=' + $scanRows.Count + ' ilk=' + $scanRows[0])
@@ -837,6 +840,8 @@ Assert ((Visible $scan 'scanResultGrid') -and -not (Visible $scan 'grid') -and (
     'tarama sonuclari gosterilirken normal register tablosu gizli' 'gorunurluk yanlis'
 Assert ([string](Get-Field $scan 'lblSummary').Text -like '*1 cihaz bulundu*3 ID*') `
     'ozet: kac cihaz bulundugu ve taranan ID sayisi' ([string](Get-Field $scan 'lblSummary').Text)
+Assert ([string](Get-Field $scan 'lblScanLive').Text -like '*Tarama bitti*1 cihaz*3 ID*') `
+    'alt canli satir: bitis ozeti' ([string](Get-Field $scan 'lblScanLive').Text)
 Assert ((Get-Field $scan '_tcp').UnitId -eq 1) 'tarama sonrasi unite id eski degerine donuyor' `
     ([string](Get-Field $scan '_tcp').UnitId)
 Invoke-Handler $scan 'OnScanBack'
@@ -919,11 +924,14 @@ Assert ((Get-Field $po 'scanGrid').RowCount -eq 0) 'segmentsiz tarama: plan bosa
 (Get-Field $po 'txtScanTimeout').Text = '300'
 Invoke-Handler $po 'OnScanRun'
 $waited = 0
+$poLive = $false
 while (-not (Get-Field $po 'btnScanRun').Enabled -and $waited -lt 20000) {
     [System.Windows.Forms.Application]::DoEvents()
+    if ([string](Get-Field $po 'lblScanLive').Text -like '*Taran*TCP*ID*var/yok*') { $poLive = $true }
     Start-Sleep -Milliseconds 50
     $waited += 50
 }
+Assert $poLive 'segmentsiz canli satir: var/yok kontrolu gosteriliyor' 'gorulmedi'
 $poRows = @(Get-ScanRows $po)
 Assert ($poRows.Count -eq 1 -and $poRows[0] -like 'ID 1*cihaz bulundu*') `
     'segmentsiz TARA: sadece cihaz basligi (register okumadan)' ('satir=' + $poRows.Count + ' ilk=' + $poRows[0])

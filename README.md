@@ -120,6 +120,8 @@ Okuma kutusunun altındaki **Tarama** düğmesi paneli açar/kapatır (kayıtlı
 
 **TARA** butonu: bağlantı varken ID aralığını sırayla tarar; bulunan her cihaz için işaretli segmentler kendi fonksiyon/adres/çözümleme ayarlarıyla okunur. Sonuçlar **ayrı sonuç tablosuna** yazılır (Cihaz / Adres / Değer / Tanım sütunları): önce gri **`ID n — cihaz bulundu`** başlığı, ardından segment başlığı ve register satırları. Normal register tablosu bu sırada **gizlenir**; **Tabloya dön** düğmesiyle (veya yeni bir OKU/Temizle ile) geri gelinir. Özet satırda `Tarama tamamlandı: X cihaz bulundu (Y ID tarandı)` yazar; tarama bitince ünite id eski değerine döner. Hatalı kayıtlar diğer segmentleri engellemez (hata toleranslı okuma çalışır).
 
+**Alt canlı durum satırı**: pencerenin en altında (log'un hemen üstünde) mavi bir satır tarama boyunca **o an hangi modda (TCP / RS485 + baud/parite/stop) ve hangi ID / register adresini** taradığını canlı gösterir (`Taranıyor: RS485 9600 Yok 1 — ID 12/247 FC03 adres 0..4`). Cihaz buldukça tarama **kesintisiz devam eder**; bulunanlar anında sonuç tablosuna ve alt log'a eklenir. Tarama bitince satır `Tarama bitti: X cihaz / Y ID` özetini gösterir.
+
 ## Ayar kalıcılığı
 
 Son kullandığın bağlantı ve okuma ayarları kapanışta (ve her başarılı bağlantıda) `%APPDATA%\ModbusScan\settings.txt` dosyasına yazılır: TCP/RS485 modu, IP, port, ünite id, zaman aşımı, COM portu, baud/parite/durdurma, fonksiyon, adres, adet, çözümleme, kelime sırası, 4xxxx gösterimi ve tarama ID aralığı/ms ile **seri tarama onay kutuları** (baud/parite/stop seçimleri). Programı yeniden açtığında alanlar dolu gelir; sıfırlamak istersen dosyayı silmen yeterli.
