@@ -1086,8 +1086,9 @@ namespace ModbusScan
 
                 EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016 ve D119 okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
-                RegisterRead temp = Client.ReadTolerant(3, 16, 1, timeoutMs);
-                RegisterRead rpm = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119 = 281
+                RegisterRead temp = Client.ReadTolerant(3, 16, 1, timeoutMs);  // D016
+                RegisterRead actualSpeed = Client.ReadTolerant(3, 10, 1, timeoutMs); // D010
+                RegisterRead maxSpeed = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119
 
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
@@ -1101,16 +1102,19 @@ namespace ModbusScan
                     EbmStatus("Sıcaklık okunamadı (D016).");
                 }
 
-                if (rpm != null && rpm.Quantity >= 1 && !rpm.Failed(0))
+                if (actualSpeed != null && actualSpeed.Quantity >= 1 && !actualSpeed.Failed(0) &&
+                    maxSpeed != null && maxSpeed.Quantity >= 1 && !maxSpeed.Failed(0))
                 {
-                    int value = (rpm.Data[0] << 8) | rpm.Data[1];
-                    lblEbmRpm.Text = "RPM (D119) = " + value;
-                    EbmStatus("RPM=" + value + " (D119)");
+                    int actual = (actualSpeed.Data[0] << 8) | actualSpeed.Data[1];
+                    int maximum = (maxSpeed.Data[0] << 8) | maxSpeed.Data[1];
+                    int rpmValue = (int)Math.Round((double)actual * maximum / 64000.0);
+                    lblEbmRpm.Text = "RPM = " + rpmValue + " (D119 " + maximum + ")";
+                    EbmStatus("RPM=" + rpmValue + " — D010=" + actual + ", D119 maksimum hız=" + maximum);
                 }
                 else
                 {
-                    lblEbmRpm.Text = "RPM (D119) = -";
-                    EbmStatus("RPM okunamadı (D119).");
+                    lblEbmRpm.Text = "RPM = -";
+                    EbmStatus("RPM hesaplanamadı: D010 veya D119 okunamadı.");
                 }
             }
             catch (Exception ex)
