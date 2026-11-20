@@ -1045,6 +1045,16 @@ namespace ModbusScan
             }
         }
 
+        private void SendEbmPasswords(int timeoutMs)
+        {
+            EbmWriteReg(53250, 25968, timeoutMs);
+            EbmStatus("FC06 53250=25968 gönderildi.");
+            EbmWriteReg(53251, 19744, timeoutMs);
+            EbmStatus("FC06 53251=19744 gönderildi.");
+            EbmWriteReg(53252, 17731, timeoutMs);
+            EbmStatus("FC06 53252=17731 gönderildi.");
+        }
+
         private void OnEbmConnectAndRead(object sender, EventArgs e)
         {
             // Baglanacak bus unit id ana baglanti kutusundan alinir.
@@ -1068,8 +1078,10 @@ namespace ModbusScan
                 }
                 Client.UnitId = (byte)unit;
 
-                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". RPM (53530) ve sıcaklık (53270) okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
+                EbmStatus("EBM şifreleri sırayla FC06 ile gönderiliyor...");
+                SendEbmPasswords(timeoutMs);
+                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". RPM (53530) ve sıcaklık (53270) okunuyor...");
 
                 // RPM holding register, sicaklik input register uzerinden okunur.
                 RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs);
@@ -2008,21 +2020,6 @@ namespace ModbusScan
                 Log("Bağlandı (" + (rtu ? "RS485" : "TCP") + "): " + Client.Description + " (unit " + unit + ") " + ms + " ms");
                 UpdateConnectionState(true);
                 SaveSettings();
-
-                // Baglantidan sonra EBM sifrelerini sirali olarak gonder (D001/D002/D003).
-                try
-                {
-                    EbmWriteReg(1, 25968, timeoutMs);   // D001
-                    Log("EBM sifre D001=25968 gonderildi.");
-                    EbmWriteReg(2, 19744, timeoutMs);   // D002
-                    Log("EBM sifre D002=19744 gonderildi.");
-                    EbmWriteReg(3, 17731, timeoutMs);   // D003
-                    Log("EBM sifre D003=17731 gonderildi.");
-                }
-                catch (Exception ex)
-                {
-                    Log("EBM sifre hatasi: " + ex.Message);
-                }
             }
             catch (Exception ex)
             {

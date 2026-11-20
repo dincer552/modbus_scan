@@ -139,12 +139,20 @@ try {
                 if ($fc -in 1, 2, 3, 4 -and $addr -ge 60000 -and $addr -lt 60100) {
                     # Hata toleransi senaryosu: cihaz bu kayitlara hic konusmaz, istek dusurulur.
                     $silent = $true
+                } elseif ($fc -eq 3 -and $addr -ge 53250 -and $addr -le 53252 -and $qty -eq 1) {
+                    # EBM sifre registerlarini geri okuma testi.
+                    $resp = Build-ReadResponse $fc (Get-Slice16 $addr $qty $script:Holding)
                 } elseif ($fc -eq 4 -and $addr -eq 53270 -and $qty -eq 1) {
                     # EBM sicaklik input registeri: ham 168, panelde 16,8 C gosterilir.
                     $resp = Build-ReadResponse $fc (Get-Slice16 $addr $qty $script:Holding)
                 } elseif ($fc -eq 3 -and $addr -eq 53530 -and $qty -eq 1) {
                     # EBM maksimum RPM holding registeri.
                     $resp = Build-ReadResponse $fc (Get-Slice16 $addr $qty $script:Holding)
+                } elseif ($fc -eq 6 -and $addr -ge 53250 -and $addr -le 53252) {
+                    $value = ([int]$pdu[3] -shl 8) -bor [int]$pdu[4]
+                    Set-Holding $addr $value | Out-Null
+                    Write-Host ("  WRITE FC06 @{0} = {1}" -f $addr, $value)
+                    $resp = [byte[]]@($fc, $pdu[1], $pdu[2], $pdu[3], $pdu[4])
                 } elseif ($addr -ge 9000 -and $addr -ne 53530) {
                     $resp = Build-Error $fc 2
                 } elseif ($fc -in 1, 2, 3, 4 -and (Test-IllegalRange $addr $qty)) {

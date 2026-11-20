@@ -164,21 +164,7 @@ $form = [Activator]::CreateInstance($type)
 (Get-Field $form 'txtUnit').Text = '1'
 (Get-Field $form 'txtTimeout').Text = '2000'
 Invoke-Handler $form 'OnConnect'
-# Baglantidan sonra arka planda gonderilen EBM sifrelerinin (D001/D002/D003) tamamlanmasini bekle,
-# sonra FakeServer test kayitlarini (reg1/2/3) geri yukle.
-$formLog=''; $formPwOk=$false; $fw=0
-while (-not $formPwOk -and $fw -lt 15000) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 200
-    $fw+=200
-    $formLog=[string](Get-Field $form 'txtLog').Text
-    if ($formLog -like '*D001=25968 gonderildi*' -and $formLog -like '*D002=19744 gonderildi*' -and $formLog -like '*D003=17731 gonderildi*') { $formPwOk=$true }
-}
-$tcpF = Get-Field $form '_tcp'
-$mF = $tcpF.GetType().GetMethod('WriteSingleRegister')
-$mF.Invoke($tcpF, @([byte]1, 0xF5C3, 2000))
-$mF.Invoke($tcpF, @([byte]2, 0xFFFF, 2000))
-$mF.Invoke($tcpF, @([byte]3, 1234, 2000))
+# Ana baglanti EBM sifresi yazmaz; normal test registerlari oldugu gibi korunur.
 
 if ((Get-Field $form 'lblStatus').Text -notmatch '127') {
     Write-Host 'HAYIR  test sunucusuna baglanilamadi, testler atlandi.'
@@ -816,7 +802,7 @@ $scan.Show()
 (Get-Field $scan 'txtUnit').Text = '1'
 (Get-Field $scan 'txtTimeout').Text = '2000'
 Invoke-Handler $scan 'OnConnect'
-# Baglantidan sonra otomatik gonderilen EBM sifreleri (D001/D002/D003) FakeServer test kayitlarini bozdu; geri yukle.
+# Normal test kayitlarini bu bolumden onceki yazma testlerinden kalan duruma gore geri yukle.
 $tcpS = Get-Field $scan '_tcp'
 $mS = $tcpS.GetType().GetMethod('WriteSingleRegister')
 $mS.Invoke($tcpS, @([byte]1, 0xF5C3, 2000))
@@ -1078,7 +1064,7 @@ Close-Form $setB
 # Sonraki formlar varsayilanlarla baslasin: gecici ayar dosyasini kaldir.
 if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
 
-# --- EBM otomatik sifre gonderme (baglantidan sonra D001/D002/D003) + 53270 sicaklik testi ---
+# --- EBM Baglan: sirali FC06 sifre yazma + 53270 sicaklik testi ---
 $tst = [Activator]::CreateInstance($type)
 $tst.Show()
 (Get-Field $tst 'cmbMode').SelectedIndex = 0
@@ -1087,35 +1073,25 @@ $tst.Show()
 (Get-Field $tst 'txtUnit').Text = '1'
 (Get-Field $tst 'txtTimeout').Text = '2000'
 Invoke-Handler $tst 'OnConnect'
-# Baglantidan sonra sifreler arka planda gonderilir; logdaki mesajlari bekle.
-$tstLog = ''
-$pwOk = $false
-$waited = 0
-while (-not $pwOk -and $waited -lt 15000) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 200
-    $waited += 200
-    $tstLog = [string](Get-Field $tst 'txtLog').Text
-    if ($tstLog -like '*D001=25968 gonderildi*' -and $tstLog -like '*D002=19744 gonderildi*' -and $tstLog -like '*D003=17731 gonderildi*') { $pwOk = $true }
-}
-Assert $pwOk 'EBM sifreleri baglantidan sonra otomatik gonderildi (D001/D002/D003)' ('log=' + $tstLog)
 Invoke-Handler $tst 'OnEbmEnter'
-Invoke-Handler $tst 'OnEbmSicaklikOku'
-$tstS2 = ''
-$waited = 0
-while ($tstS2 -notlike '*53270*' -and $waited -lt 10000) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 200
-    $waited += 200
-    $tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
-}
-Assert ($tstS2 -like '*FC04 53270*16?8*ham=168*') 'EBM FC04 53270 ham 168 / 10 sicakligi okundu' ('durum=' + $tstS2)
-# FakeServer kayitlarini geri yukle (bir sonraki calistirma icin bozulmasin).
+Invoke-Handler $tst 'OnEbmConnectAndRead'
+$tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
+$i1 = $tstS2.IndexOf('FC06 53250=25968 gönderildi.')
+$i2 = $tstS2.IndexOf('FC06 53251=19744 gönderildi.')
+$i3 = $tstS2.IndexOf('FC06 53252=17731 gönderildi.')
+Assert ($i1 -ge 0 -and $i2 -gt $i1 -and $i3 -gt $i2) `
+    'EBM Baglan: sifreler FC06 53250/53251/53252 sirasiyla gonderildi' ('durum=' + $tstS2)
 $tcpT = Get-Field $tst '_tcp'
-$mT = $tcpT.GetType().GetMethod('WriteSingleRegister')
-$mT.Invoke($tcpT, @([byte]1, 0xF5C3, 2000))
-$mT.Invoke($tcpT, @([byte]2, 0xFFFF, 2000))
-$mT.Invoke($tcpT, @([byte]3, 1234, 2000))
+$readT = $tcpT.GetType().GetMethod('Read')
+$pw1 = $readT.Invoke($tcpT, @([byte]3, 53250, 1, 2000))
+$pw2 = $readT.Invoke($tcpT, @([byte]3, 53251, 1, 2000))
+$pw3 = $readT.Invoke($tcpT, @([byte]3, 53252, 1, 2000))
+$v1 = ([int]$pw1.Data[0] * 256) + [int]$pw1.Data[1]
+$v2 = ([int]$pw2.Data[0] * 256) + [int]$pw2.Data[1]
+$v3 = ([int]$pw3.Data[0] * 256) + [int]$pw3.Data[1]
+Assert ($v1 -eq 25968 -and $v2 -eq 19744 -and $v3 -eq 17731) `
+    'EBM sifre degerleri 25968/19744/17731 registerlara yazildi' ("degerler=$v1/$v2/$v3")
+Assert ($tstS2 -like '*FC04 53270*16?8*ham=168*') 'EBM FC04 53270 ham 168 / 10 sicakligi okundu' ('durum=' + $tstS2)
 Close-Form $tst
 
 # Kullanicinin kendi dosyalarina dokunulmadigini dogrula ve gecici klasoru topla.
