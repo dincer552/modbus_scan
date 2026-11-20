@@ -847,7 +847,7 @@ namespace ModbusScan
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
 
-            // Baglan dugmesi ana RS485 ayarlarini kullanir; 53530 registerini ve sicakligi okur.
+            // Baglan dugmesi ana RS485 ayarlarini kullanir; RPM ve sicaklik kayitlarini okur.
             btnEbmSicaklikOku = new Button();
             btnEbmSicaklikOku.Text = "Bağlan";
             btnEbmSicaklikOku.SetBounds(10, 52, 90, 25);
@@ -1068,11 +1068,10 @@ namespace ModbusScan
                 }
                 Client.UnitId = (byte)unit;
 
-                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". Maksimum RPM adresi 53530 okunuyor...");
+                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". RPM (53530) ve sıcaklık (53270) okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
 
-                // Bu register normal okuma ekraninda da dogrudan FC03 ile okunabilir.
-                // D016 desteklenmese bile RPM degeri gorunur kalir.
+                // Bu registerlar normal okuma ekraninda da dogrudan FC03 ile okunabilir.
                 RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs);
                 if (maxSpeed != null && maxSpeed.Quantity >= 1 && !maxSpeed.Failed(0))
                 {
@@ -1086,17 +1085,17 @@ namespace ModbusScan
                     EbmStatus("Maksimum RPM okunamadı (53530).");
                 }
 
-                RegisterRead temp = Client.ReadTolerant(3, 22, 1, timeoutMs); // D016 (0x16=22)
+                RegisterRead temp = Client.ReadTolerant(3, 53270, 1, timeoutMs);
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
                     int value = (temp.Data[0] << 8) | temp.Data[1];
                     lblEbmSicaklikDeger.Text = value.ToString();
-                    EbmStatus("Sıcaklık=" + value + " (D016)");
+                    EbmStatus("Sıcaklık (53270) = " + value);
                 }
                 else
                 {
                     lblEbmSicaklikDeger.Text = "-";
-                    EbmStatus("Sıcaklık okunamadı (D016).");
+                    EbmStatus("Sıcaklık okunamadı (53270).");
                 }
             }
             catch (Exception ex)
@@ -1111,17 +1110,17 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                RegisterRead r = Client.ReadTolerant(3, 22, 1, timeoutMs); // D016 (0x16=22)
+                RegisterRead r = Client.ReadTolerant(3, 53270, 1, timeoutMs);
                 if (r != null && r.Quantity >= 1 && !r.Failed(0))
                 {
                     int value = (r.Data[0] << 8) | r.Data[1];
                     lblEbmSicaklikDeger.Text = value.ToString();
-                    EbmStatus("D016 motor sıcaklığı: " + value);
+                    EbmStatus("Sıcaklık (53270) = " + value);
                 }
                 else
                 {
                     lblEbmSicaklikDeger.Text = "-";
-                    EbmStatus("D016 okunamadı.");
+                    EbmStatus("Sıcaklık okunamadı (53270).");
                 }
             }
             catch (Exception ex)

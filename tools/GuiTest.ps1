@@ -995,6 +995,20 @@ Assert ([string](Get-Field $ebm 'lblEbmRpm').Text -like '*53530*3000*') `
 Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*RPM (53530) = 3000*') `
     'EBM Baglan: RPM durumu 53530 = 3000 bildiriyor' ([string](Get-Field $ebm 'txtEbmStatus').Text)
 
+# Normal okuma ve EBM paneli ayni 53270 sicaklik registerini ayni degerle gostermeli.
+Set-Combo $ebm 'cmbFunction' 0
+(Get-Field $ebm 'txtAddress').Text = '53270'
+(Get-Field $ebm 'txtQuantity').Text = '1'
+Invoke-Handler $ebm 'OnRead'
+$normalTempRows = @(Get-GridRows $ebm)
+Assert ($normalTempRows.Count -eq 1 -and $normalTempRows[0] -like '*| 32 |*') `
+    'normal okuma: FC03 53270 sicaklik degeri 32' ($normalTempRows -join '; ')
+Invoke-Handler $ebm 'OnEbmConnectAndRead'
+Assert ([string](Get-Field $ebm 'lblEbmSicaklikDeger').Text -eq '32') `
+    'EBM Baglan: 53270 sicaklik degeri 32 olarak gosteriliyor' ([string](Get-Field $ebm 'lblEbmSicaklikDeger').Text)
+Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*Sıcaklık (53270) = 32*') `
+    'EBM Baglan: sicaklik durumu 53270 = 32 bildiriyor' ([string](Get-Field $ebm 'txtEbmStatus').Text)
+
 (Get-Field $ebm 'txtEbmFoundAddr').Text = '300'
 Invoke-Handler $ebm 'OnEbmSaveAddr'
 Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*1..247*' -and (Visible $ebm 'gbEbm')) `
@@ -1064,7 +1078,7 @@ Close-Form $setB
 # Sonraki formlar varsayilanlarla baslasin: gecici ayar dosyasini kaldir.
 if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
 
-# --- EBM otomatik sifre gonderme (baglantidan sonra D001/D002/D003) + D016 sicaklik testi ---
+# --- EBM otomatik sifre gonderme (baglantidan sonra D001/D002/D003) + 53270 sicaklik testi ---
 $tst = [Activator]::CreateInstance($type)
 $tst.Show()
 (Get-Field $tst 'cmbMode').SelectedIndex = 0
@@ -1089,13 +1103,13 @@ Invoke-Handler $tst 'OnEbmEnter'
 Invoke-Handler $tst 'OnEbmSicaklikOku'
 $tstS2 = ''
 $waited = 0
-while ($tstS2 -notlike '*D016*' -and $waited -lt 10000) {
+while ($tstS2 -notlike '*53270*' -and $waited -lt 10000) {
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 200
     $waited += 200
     $tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
 }
-Assert ($tstS2 -like '*D016*') 'EBM D016 motor sicakligi okundu' ('durum=' + $tstS2)
+Assert ($tstS2 -like '*Sıcaklık (53270) = 32*') 'EBM 53270 sicakligi okundu' ('durum=' + $tstS2)
 # FakeServer kayitlarini geri yukle (bir sonraki calistirma icin bozulmasin).
 $tcpT = Get-Field $tst '_tcp'
 $mT = $tcpT.GetType().GetMethod('WriteSingleRegister')

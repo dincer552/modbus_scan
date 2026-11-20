@@ -6,7 +6,7 @@
 # Test amacli sahte Modbus TCP sunucusu. Gercek cihaz yokken istemciyi dogrulamak icin kullanilir.
 $ErrorActionPreference = 'Stop'
 
-# 53531 register: EBM adresleme ve maksimum RPM (53530) testleri icin yeterli alan.
+# 53531 register: EBM adresleme, sicaklik (53270) ve maksimum RPM (53530) testleri icin yeterli alan.
 $script:Holding = New-Object 'byte[]' 107062
 $script:Coils = @{}
 # Hata toleransi senaryosu: okuma araligi bu kayitlara dokunursa cihaz exception 2 verir.
@@ -28,7 +28,8 @@ Set-Reg 3 1234
 Set-Reg 4 0x0001          # reg4..5 = uint32 100000 (ABCD)
 Set-Reg 5 0x86A0
 for ($i = 6; $i -lt 20; $i++) { Set-Reg $i ($i * 10) }
-# EBM maksimum RPM kaydi: normal okuma ve EBM paneli ayni degeri gostermeli.
+# EBM sicaklik ve maksimum RPM kayitlari: normal okuma ve EBM paneli ayni degerleri gostermeli.
+Set-Reg 53270 32
 Set-Reg 53530 3000
 # reg12..13 = F5 C3 40 48 -> CDAB sirasiyla okununca float 3.14
 Set-Reg 12 0xF5C3; Set-Reg 13 0x4048
@@ -138,10 +139,10 @@ try {
                 if ($fc -in 1, 2, 3, 4 -and $addr -ge 60000 -and $addr -lt 60100) {
                     # Hata toleransi senaryosu: cihaz bu kayitlara hic konusmaz, istek dusurulur.
                     $silent = $true
-                } elseif ($fc -in 3, 4 -and $addr -eq 53530 -and $qty -eq 1) {
-                    # EBM maksimum RPM kaydi: normal okunabilir bir holding registeri.
+                } elseif ($fc -in 3, 4 -and ($addr -eq 53270 -or $addr -eq 53530) -and $qty -eq 1) {
+                    # EBM sicaklik/maksimum RPM kayitlari: normal okunabilir holding registerlari.
                     $resp = Build-ReadResponse $fc (Get-Slice16 $addr $qty $script:Holding)
-                } elseif ($addr -ge 9000 -and $addr -ne 53530) {
+                } elseif ($addr -ge 9000 -and $addr -ne 53270 -and $addr -ne 53530) {
                     $resp = Build-Error $fc 2
                 } elseif ($fc -in 1, 2, 3, 4 -and (Test-IllegalRange $addr $qty)) {
                     $resp = Build-Error $fc 2
