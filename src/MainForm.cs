@@ -847,7 +847,7 @@ namespace ModbusScan
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
 
-            // Bulunan fana baglanip D016 sicaklik ve D119 RPM bilgisini oku.
+            // Baglan dugmesi ana RS485 ayarlarini kullanir; 53530 registerini ve sicakligi okur.
             btnEbmSicaklikOku = new Button();
             btnEbmSicaklikOku.Text = "Bağlan";
             btnEbmSicaklikOku.SetBounds(10, 52, 90, 25);
@@ -857,7 +857,7 @@ namespace ModbusScan
             gbEbm.Controls.Add(lblEbmSicaklik);
             lblEbmSicaklikDeger = MakeLabel("-", 174, 58);
             gbEbm.Controls.Add(lblEbmSicaklikDeger);
-            lblEbmRpm = MakeLabel("RPM (D119) = -", 250, 58);
+            lblEbmRpm = MakeLabel("RPM (53530) = -", 250, 58);
             gbEbm.Controls.Add(lblEbmRpm);
 
             txtEbmStatus = new TextBox();
@@ -1047,50 +1047,46 @@ namespace ModbusScan
 
         private void OnEbmConnectAndRead(object sender, EventArgs e)
         {
-            if (scanResultGrid == null || scanResultGrid.CurrentCell == null)
-            {
-                EbmStatus("Önce Tarama yapıp bulunan fan satırını seçin.");
-                return;
-            }
-
-            int row = scanResultGrid.CurrentCell.RowIndex;
-            if (row < 0 || row >= scanResultGrid.Rows.Count)
-            {
-                EbmStatus("Seçili fan bulunamadı.");
-                return;
-            }
-
-            object device = scanResultGrid.Rows[row].Cells["rDevice"].Value;
+            // Baglanacak bus unit id ana baglanti kutusundan alinir.
+            // COM, baud, parite, stop bit ve timeout degerleri de ayni kutudan kullanilir.
             int unit;
-            string deviceText = device == null ? "" : device.ToString();
-            if (!deviceText.StartsWith("ID ") ||
-                !int.TryParse(deviceText.Substring(3), out unit) || unit < 1 || unit > 247)
+            if (!int.TryParse(txtUnit.Text.Trim(), out unit) || unit < 1 || unit > 247)
             {
-                EbmStatus("Seçili satır bir fan cihazı değil. 'ID n' yazan cihaz satırını seçin.");
+                EbmStatus("Geçersiz cihaz ID'si: 1..247 arası olmalı.");
                 return;
             }
 
             try
             {
-                txtUnit.Text = unit.ToString();
                 if (Client == null || !Client.IsConnected)
                     OnConnect(sender, e);
-                else
-                    Client.UnitId = (byte)unit;
 
                 if (Client == null || !Client.IsConnected)
                 {
                     EbmStatus("Fan bağlantısı kurulamadı (ID " + unit + ").");
                     return;
                 }
+                Client.UnitId = (byte)unit;
 
-                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016, D010 ve maksimum RPM adresi 53530 okunuyor...");
+                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". Maksimum RPM adresi 53530 okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
-                // EBM D-noktaları onaltılık: D016=0x16=22, D010=0x10=16, D119=0x119=281
-                RegisterRead temp = Client.ReadTolerant(3, 22, 1, timeoutMs);  // D016 (0x16=22)
-                RegisterRead actualSpeed = Client.ReadTolerant(3, 16, 1, timeoutMs); // D010 (0x10=16)
-                RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs); // Maksimum RPM: taramada dogrulanan adres
 
+                // Bu register normal okuma ekraninda da dogrudan FC03 ile okunabilir.
+                // D016 desteklenmese bile RPM degeri gorunur kalir.
+                RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs);
+                if (maxSpeed != null && maxSpeed.Quantity >= 1 && !maxSpeed.Failed(0))
+                {
+                    int maximum = (maxSpeed.Data[0] << 8) | maxSpeed.Data[1];
+                    lblEbmRpm.Text = "RPM (53530) = " + maximum;
+                    EbmStatus("RPM (53530) = " + maximum);
+                }
+                else
+                {
+                    lblEbmRpm.Text = "RPM (53530) = -";
+                    EbmStatus("Maksimum RPM okunamadı (53530).");
+                }
+
+                RegisterRead temp = Client.ReadTolerant(3, 22, 1, timeoutMs); // D016 (0x16=22)
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
                     int value = (temp.Data[0] << 8) | temp.Data[1];
@@ -1101,21 +1097,6 @@ namespace ModbusScan
                 {
                     lblEbmSicaklikDeger.Text = "-";
                     EbmStatus("Sıcaklık okunamadı (D016).");
-                }
-
-                if (actualSpeed != null && actualSpeed.Quantity >= 1 && !actualSpeed.Failed(0) &&
-                    maxSpeed != null && maxSpeed.Quantity >= 1 && !maxSpeed.Failed(0))
-                {
-                    int actual = (actualSpeed.Data[0] << 8) | actualSpeed.Data[1];
-                    int maximum = (maxSpeed.Data[0] << 8) | maxSpeed.Data[1];
-                    int rpmValue = (int)Math.Round((double)actual * maximum / 64000.0);
-                    lblEbmRpm.Text = "RPM = " + rpmValue + " (Max 53530: " + maximum + ")";
-                    EbmStatus("RPM=" + rpmValue + " — D010=" + actual + ", 53530 maksimum hız=" + maximum);
-                }
-                else
-                {
-                    lblEbmRpm.Text = "RPM = -";
-                    EbmStatus("RPM hesaplanamadı: D010 veya D119 okunamadı.");
                 }
             }
             catch (Exception ex)

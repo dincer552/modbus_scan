@@ -981,6 +981,20 @@ Assert ((Visible $ebm 'gbEbm') -and -not (Visible $ebm 'gbScan')) 'EBM paneli ac
 Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*D100*') 'mevcut adres D100 den okunup raporlaniyor' `
     ([string](Get-Field $ebm 'txtEbmStatus').Text)
 
+# Normal okuma ve EBM paneli ayni 53530 registerini ayni degerle gostermeli.
+Set-Combo $ebm 'cmbFunction' 0
+(Get-Field $ebm 'txtAddress').Text = '53530'
+(Get-Field $ebm 'txtQuantity').Text = '1'
+Invoke-Handler $ebm 'OnRead'
+$normalRows = @(Get-GridRows $ebm)
+Assert ($normalRows.Count -eq 1 -and $normalRows[0] -like '*| 3000 |*') `
+    'normal okuma: FC03 53530 degeri 3000' ($normalRows -join '; ')
+Invoke-Handler $ebm 'OnEbmConnectAndRead'
+Assert ([string](Get-Field $ebm 'lblEbmRpm').Text -like '*53530*3000*') `
+    'EBM Baglan: 53530 RPM degeri 3000 olarak gosteriliyor' ([string](Get-Field $ebm 'lblEbmRpm').Text)
+Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*RPM (53530) = 3000*') `
+    'EBM Baglan: RPM durumu 53530 = 3000 bildiriyor' ([string](Get-Field $ebm 'txtEbmStatus').Text)
+
 (Get-Field $ebm 'txtEbmFoundAddr').Text = '300'
 Invoke-Handler $ebm 'OnEbmSaveAddr'
 Assert ([string](Get-Field $ebm 'txtEbmStatus').Text -like '*1..247*' -and (Visible $ebm 'gbEbm')) `
