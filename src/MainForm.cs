@@ -105,8 +105,9 @@ namespace ModbusScan
         private GroupBox gbEbm;
         private Button btnScanToggle;
         private Button btnEbmEnter, btnEbmBack, btnEbmStart25, btnEbmSaveAddr;
-        private TextBox txtEbmStatus, txtEbmFoundAddr;
-        private Label lblEbmAddr;
+        private Button btnEbmSifreGonder, btnEbmSicaklikOku, btnScanConnectToFound;
+        private TextBox txtEbmStatus, txtEbmFoundAddr, txtEbmSifre1, txtEbmSifre2, txtEbmSifre3;
+        private Label lblEbmAddr, lblEbmSicaklikDeger, lblEbmSifre1, lblEbmSifre2, lblEbmSifre3, lblEbmSicaklik;
 
         // Ayar kalıcılığı
         private static string SettingsPath()
@@ -667,6 +668,14 @@ namespace ModbusScan
             btnScanBack.Visible = false;
             btnScanBack.Click += OnScanBack;
 
+            btnScanConnectToFound = new Button();
+            btnScanConnectToFound.Text = "Seçili Cihaza Bağlan";
+            btnScanConnectToFound.SetBounds(392, 132, 84, 23);
+            btnScanConnectToFound.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnScanConnectToFound.Visible = false;
+            btnScanConnectToFound.Enabled = false;
+            btnScanConnectToFound.Click += OnScanConnectToFound;
+
             // Cihaz keşfi seçenekleri: taranacak ünite ID aralığı ve keşif zaman aşımı.
             scanOptions = new Panel();
             scanOptions.SetBounds(6, 182, 380, 24);
@@ -738,6 +747,7 @@ namespace ModbusScan
             gbScan.Controls.Add(btnScanRun);
             gbScan.Controls.Add(btnScanStop);
             gbScan.Controls.Add(btnScanBack);
+            gbScan.Controls.Add(btnScanConnectToFound);
 
             // Tarama sonuçları tablosu: normal register tablosunun yerini alır.
             scanResultGrid = new DataGridView();
@@ -768,6 +778,8 @@ namespace ModbusScan
             grid.Visible = !show;
             scanResultGrid.Visible = show;
             btnScanBack.Visible = show;
+            btnScanConnectToFound.Visible = show;
+            btnScanConnectToFound.Enabled = show && scanResultGrid.Rows.Count > 0;
         }
 
         private void OnScanBack(object sender, EventArgs e)
@@ -775,12 +787,36 @@ namespace ModbusScan
             ShowScanResults(false);
         }
 
+        private void OnScanConnectToFound(object sender, EventArgs e)
+        {
+            if (scanResultGrid == null || !scanResultGrid.Visible || scanResultGrid.CurrentCell == null)
+            {
+                lblSummary.Text = "Seçili cihaz yok.";
+                return;
+            }
+            int row = scanResultGrid.CurrentCell.RowIndex;
+            if (row < 0 || row >= scanResultGrid.Rows.Count) return;
+            object dev = scanResultGrid.Rows[row].Cells["rDevice"].Value;
+            if (dev == null) return;
+            string text = dev.ToString();
+            // "ID n" formatından n'i al.
+            int id = -1;
+            if (text.StartsWith("ID ")) int.TryParse(text.Substring(3), out id);
+            if (id < 1 || id > 247)
+            {
+                lblSummary.Text = "Geçersiz cihaz kimliği.";
+                return;
+            }
+            txtUnit.Text = id.ToString();
+            OnConnect(sender, e);
+        }
+
         /// <summary>EBM-papst fan adresleme paneli: %25 start teyidi + adres kaydı (RTU, D100/D001/D101/D00C).</summary>
         private void BuildEbmUi()
         {
             gbEbm = new GroupBox();
             gbEbm.Text = "EBM Fan Adresleme";
-            gbEbm.SetBounds(8, 224, 484, 118);
+            gbEbm.SetBounds(8, 224, 484, 172);
             gbEbm.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbEbm.Visible = false;
 
@@ -811,8 +847,38 @@ namespace ModbusScan
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
 
+            // Şifre kayıtları (D001/D002/D003): bağlantıdan sonra gönderilir.
+            lblEbmSifre1 = MakeLabel("Şifre D001:", 10, 58);
+            gbEbm.Controls.Add(lblEbmSifre1);
+            txtEbmSifre1 = MakeTextBox("25968", 70, 52, 44);
+            gbEbm.Controls.Add(txtEbmSifre1);
+            lblEbmSifre2 = MakeLabel("D002:", 118, 58);
+            gbEbm.Controls.Add(lblEbmSifre2);
+            txtEbmSifre2 = MakeTextBox("19744", 152, 52, 44);
+            gbEbm.Controls.Add(txtEbmSifre2);
+            lblEbmSifre3 = MakeLabel("D003:", 200, 58);
+            gbEbm.Controls.Add(lblEbmSifre3);
+            txtEbmSifre3 = MakeTextBox("17731", 230, 52, 44);
+            gbEbm.Controls.Add(txtEbmSifre3);
+            btnEbmSifreGonder = new Button();
+            btnEbmSifreGonder.Text = "Şifre Gönder";
+            btnEbmSifreGonder.SetBounds(278, 52, 100, 25);
+            btnEbmSifreGonder.Click += OnEbmSifreGonder;
+            gbEbm.Controls.Add(btnEbmSifreGonder);
+
+            // D016 motor sıcaklığı okuma.
+            lblEbmSicaklik = MakeLabel("Motor Sıcaklığı (D016):", 10, 90);
+            gbEbm.Controls.Add(lblEbmSicaklik);
+            btnEbmSicaklikOku = new Button();
+            btnEbmSicaklikOku.Text = "Sıcaklık Oku";
+            btnEbmSicaklikOku.SetBounds(140, 84, 100, 25);
+            btnEbmSicaklikOku.Click += OnEbmSicaklikOku;
+            gbEbm.Controls.Add(btnEbmSicaklikOku);
+            lblEbmSicaklikDeger = MakeLabel("-", 245, 90);
+            gbEbm.Controls.Add(lblEbmSicaklikDeger);
+
             txtEbmStatus = new TextBox();
-            txtEbmStatus.SetBounds(10, 50, 462, 28);
+            txtEbmStatus.SetBounds(10, 114, 462, 54);
             txtEbmStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             txtEbmStatus.Multiline = true;
             txtEbmStatus.ReadOnly = true;
@@ -854,7 +920,7 @@ namespace ModbusScan
             scanOptions.Top = 18 + gridH + 4;
             scanSerial.Top = scanOptions.Top + 24 + 2;
             int extra = scanSerial.Visible ? scanSerial.Height + 4 : 0;
-            gbScan.Height = Math.Max(gridH + 26 + 28, 132) + extra;
+            gbScan.Height = Math.Max(gridH + 26 + 28, 160) + extra;
         }
 
         /// <summary>Tarama/EBM paneli açıkken güncelleme şeridini ve tabloyu aşağı kaydırır; çakışmayı önler.</summary>
@@ -993,6 +1059,59 @@ namespace ModbusScan
             catch (Exception ex)
             {
                 EbmStatus("Kaydetme hatası: " + ex.Message);
+            }
+        }
+
+        private void OnEbmSifreGonder(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected) { EbmStatus("Bağlantı yok."); return; }
+            int timeoutMs = EbmTimeoutMs();
+            try
+            {
+                int d001, d002, d003;
+                if (!int.TryParse(txtEbmSifre1.Text.Trim(), out d001) ||
+                    !int.TryParse(txtEbmSifre2.Text.Trim(), out d002) ||
+                    !int.TryParse(txtEbmSifre3.Text.Trim(), out d003))
+                {
+                    EbmStatus("Şifre değerleri sayısal olmalı.");
+                    return;
+                }
+                EbmWriteReg(1, d001, timeoutMs);   // D001
+                EbmStatus("D001=" + d001 + " yazıldı.");
+                EbmWriteReg(2, d002, timeoutMs);   // D002
+                EbmStatus("D002=" + d002 + " yazıldı.");
+                EbmWriteReg(3, d003, timeoutMs);   // D003
+                EbmStatus("D003=" + d003 + " yazıldı. Şifre gönderildi.");
+            }
+            catch (Exception ex)
+            {
+                EbmStatus("Şifre hatası: " + ex.Message);
+            }
+        }
+
+        private void OnEbmSicaklikOku(object sender, EventArgs e)
+        {
+            if (Client == null || !Client.IsConnected) { EbmStatus("Bağlantı yok."); return; }
+            int timeoutMs = EbmTimeoutMs();
+            try
+            {
+                RegisterRead r = Client.ReadTolerant(3, 16, 1, timeoutMs);
+                if (r != null && r.Quantity >= 1 && !r.Failed(0))
+                {
+                    int value = (r.Data[0] << 8) | r.Data[1];
+                    lblEbmSicaklikDeger.Text = value.ToString();
+                    EbmStatus("D016 motor sıcaklığı: " + value);
+                }
+                else
+                {
+                    lblEbmSicaklikDeger.Text = "-";
+                    EbmStatus("D016 okunamadı.");
+                }
+            }
+            catch (Exception ex)
+            {
+                lblEbmSicaklikDeger.Text = "-";
+                EbmStatus("Sıcaklık hatası: " + ex.Message);
             }
         }
 

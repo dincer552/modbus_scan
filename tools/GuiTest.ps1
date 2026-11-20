@@ -1029,6 +1029,33 @@ Close-Form $setB
 # Sonraki formlar varsayilanlarla baslasin: gecici ayar dosyasini kaldir.
 if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
 
+# --- EBM sifre gonder (D001/D002/D003) + D016 motor sicaklik okuma testi ---
+$tst = [Activator]::CreateInstance($type)
+$tst.Show()
+(Get-Field $tst 'cmbMode').SelectedIndex = 0
+(Get-Field $tst 'txtIp').Text = '127.0.0.1'
+(Get-Field $tst 'txtPort').Text = "$Port"
+(Get-Field $tst 'txtUnit').Text = '1'
+(Get-Field $tst 'txtTimeout').Text = '2000'
+Invoke-Handler $tst 'OnConnect'
+Invoke-Handler $tst 'OnEbmEnter'
+(Get-Field $tst 'txtEbmSifre1').Text = '25968'
+(Get-Field $tst 'txtEbmSifre2').Text = '19744'
+(Get-Field $tst 'txtEbmSifre3').Text = '17731'
+Invoke-Handler $tst 'OnEbmSifreGonder'
+$tstS1 = [string](Get-Field $tst 'txtEbmStatus').Text
+Assert ($tstS1 -like '*D003=17731*') 'EBM sifre D001/D002/D003 gonderildi' ('durum=' + $tstS1)
+Invoke-Handler $tst 'OnEbmSicaklikOku'
+$tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
+Assert ($tstS2 -like '*D016*') 'EBM D016 motor sicakligi okundu' ('durum=' + $tstS2)
+# FakeServer kayitlarini geri yukle (bir sonraki calistirma icin bozulmasin).
+$tcpT = Get-Field $tst '_tcp'
+$mT = $tcpT.GetType().GetMethod('WriteSingleRegister')
+$mT.Invoke($tcpT, @([byte]1, 0xF5C3, 2000))
+$mT.Invoke($tcpT, @([byte]2, 0xFFFF, 2000))
+$mT.Invoke($tcpT, @([byte]3, 1234, 2000))
+Close-Form $tst
+
 # Kullanicinin kendi dosyalarina dokunulmadigini dogrula ve gecici klasoru topla.
 $userDefAfter = if (Test-Path $userDefPath) { [System.IO.File]::ReadAllBytes($userDefPath) } else { $null }
 $untouched = ($null -eq $userDefBefore -and $null -eq $userDefAfter)
