@@ -1071,7 +1071,7 @@ namespace ModbusScan
                 EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". RPM (53530) ve sıcaklık (53270) okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
 
-                // Bu registerlar normal okuma ekraninda da dogrudan FC03 ile okunabilir.
+                // RPM holding register, sicaklik input register uzerinden okunur.
                 RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs);
                 if (maxSpeed != null && maxSpeed.Quantity >= 1 && !maxSpeed.Failed(0))
                 {
@@ -1085,12 +1085,13 @@ namespace ModbusScan
                     EbmStatus("Maksimum RPM okunamadı (53530).");
                 }
 
-                RegisterRead temp = Client.ReadTolerant(3, 53270, 1, timeoutMs);
+                RegisterRead temp = Client.ReadTolerant(4, 53270, 1, timeoutMs);
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
-                    int value = (temp.Data[0] << 8) | temp.Data[1];
-                    lblEbmSicaklikDeger.Text = value.ToString();
-                    EbmStatus("Sıcaklık (53270) = " + value);
+                    int rawValue = (temp.Data[0] << 8) | temp.Data[1];
+                    string value = (rawValue / 10.0).ToString("0.0", CultureInfo.CurrentCulture);
+                    lblEbmSicaklikDeger.Text = value + " °C";
+                    EbmStatus("Sıcaklık (FC04 53270) = " + value + " °C (ham=" + rawValue + ")");
                 }
                 else
                 {
@@ -1110,12 +1111,13 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                RegisterRead r = Client.ReadTolerant(3, 53270, 1, timeoutMs);
+                RegisterRead r = Client.ReadTolerant(4, 53270, 1, timeoutMs);
                 if (r != null && r.Quantity >= 1 && !r.Failed(0))
                 {
-                    int value = (r.Data[0] << 8) | r.Data[1];
-                    lblEbmSicaklikDeger.Text = value.ToString();
-                    EbmStatus("Sıcaklık (53270) = " + value);
+                    int rawValue = (r.Data[0] << 8) | r.Data[1];
+                    string value = (rawValue / 10.0).ToString("0.0", CultureInfo.CurrentCulture);
+                    lblEbmSicaklikDeger.Text = value + " °C";
+                    EbmStatus("Sıcaklık (FC04 53270) = " + value + " °C (ham=" + rawValue + ")");
                 }
                 else
                 {
