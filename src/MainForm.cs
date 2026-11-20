@@ -107,7 +107,7 @@ namespace ModbusScan
         private Button btnEbmEnter, btnEbmBack, btnEbmStart25, btnEbmSaveAddr;
         private Button btnEbmSicaklikOku, btnScanConnectToFound;
         private TextBox txtEbmStatus, txtEbmFoundAddr;
-        private Label lblEbmAddr, lblEbmSicaklikDeger, lblEbmSicaklik;
+        private Label lblEbmAddr, lblEbmSicaklikDeger, lblEbmSicaklik, lblEbmRpm;
 
         // Ayar kalıcılığı
         private static string SettingsPath()
@@ -851,12 +851,16 @@ namespace ModbusScan
             lblEbmSicaklik = MakeLabel("Motor Sicakligi (D016):", 10, 58);
             gbEbm.Controls.Add(lblEbmSicaklik);
             btnEbmSicaklikOku = new Button();
-            btnEbmSicaklikOku.Text = "Sicaklik Oku";
-            btnEbmSicaklikOku.SetBounds(140, 52, 100, 25);
-            btnEbmSicaklikOku.Click += OnEbmSicaklikOku;
+            btnEbmSicaklikOku.Text = "Bağlan";
+            btnEbmSicaklikOku.SetBounds(10, 52, 90, 25);
+            btnEbmSicaklikOku.Click += OnEbmConnectAndRead;
             gbEbm.Controls.Add(btnEbmSicaklikOku);
-            lblEbmSicaklikDeger = MakeLabel("-", 245, 58);
+            lblEbmSicaklik = MakeLabel("Sıcaklık=", 108, 58);
+            gbEbm.Controls.Add(lblEbmSicaklik);
+            lblEbmSicaklikDeger = MakeLabel("-", 174, 58);
             gbEbm.Controls.Add(lblEbmSicaklikDeger);
+            lblEbmRpm = MakeLabel("RPM (D119) = -", 250, 58);
+            gbEbm.Controls.Add(lblEbmRpm);
 
             txtEbmStatus = new TextBox();
             txtEbmStatus.SetBounds(10, 86, 462, 52);
@@ -1040,6 +1044,80 @@ namespace ModbusScan
             catch (Exception ex)
             {
                 EbmStatus("Kaydetme hatası: " + ex.Message);
+            }
+        }
+
+        private void OnEbmConnectAndRead(object sender, EventArgs e)
+        {
+            if (scanResultGrid == null || scanResultGrid.CurrentCell == null)
+            {
+                EbmStatus("Önce Tarama yapıp bulunan fan satırını seçin.");
+                return;
+            }
+
+            int row = scanResultGrid.CurrentCell.RowIndex;
+            if (row < 0 || row >= scanResultGrid.Rows.Count)
+            {
+                EbmStatus("Seçili fan bulunamadı.");
+                return;
+            }
+
+            object device = scanResultGrid.Rows[row].Cells["rDevice"].Value;
+            int unit;
+            string deviceText = device == null ? "" : device.ToString();
+            if (!deviceText.StartsWith("ID ") ||
+                !int.TryParse(deviceText.Substring(3), out unit) || unit < 1 || unit > 247)
+            {
+                EbmStatus("Seçili satır bir fan cihazı değil. 'ID n' yazan cihaz satırını seçin.");
+                return;
+            }
+
+            try
+            {
+                txtUnit.Text = unit.ToString();
+                if (Client == null || !Client.IsConnected)
+                    OnConnect(sender, e);
+                else
+                    Client.UnitId = (byte)unit;
+
+                if (Client == null || !Client.IsConnected)
+                {
+                    EbmStatus("Fan bağlantısı kurulamadı (ID " + unit + ").");
+                    return;
+                }
+
+                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016 ve D119 okunuyor...");
+                int timeoutMs = EbmTimeoutMs();
+                RegisterRead temp = Client.ReadTolerant(3, 16, 1, timeoutMs);
+                RegisterRead rpm = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119 = 281
+
+                if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
+                {
+                    int value = (temp.Data[0] << 8) | temp.Data[1];
+                    lblEbmSicaklikDeger.Text = value.ToString();
+                    EbmStatus("Sıcaklık=" + value + " (D016)");
+                }
+                else
+                {
+                    lblEbmSicaklikDeger.Text = "-";
+                    EbmStatus("Sıcaklık okunamadı (D016).");
+                }
+
+                if (rpm != null && rpm.Quantity >= 1 && !rpm.Failed(0))
+                {
+                    int value = (rpm.Data[0] << 8) | rpm.Data[1];
+                    lblEbmRpm.Text = "RPM (D119) = " + value;
+                    EbmStatus("RPM=" + value + " (D119)");
+                }
+                else
+                {
+                    lblEbmRpm.Text = "RPM (D119) = -";
+                    EbmStatus("RPM okunamadı (D119).");
+                }
+            }
+            catch (Exception ex)
+            {
+                EbmStatus("Fan bağlantı/okuma hatası: " + ex.Message);
             }
         }
 
