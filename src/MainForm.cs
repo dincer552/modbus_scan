@@ -1084,12 +1084,12 @@ namespace ModbusScan
                     return;
                 }
 
-                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016 ve D119 okunuyor...");
+                EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016, D010 ve maksimum RPM adresi 53530 okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
                 // EBM D-noktaları onaltılık: D016=0x16=22, D010=0x10=16, D119=0x119=281
                 RegisterRead temp = Client.ReadTolerant(3, 22, 1, timeoutMs);  // D016 (0x16=22)
                 RegisterRead actualSpeed = Client.ReadTolerant(3, 16, 1, timeoutMs); // D010 (0x10=16)
-                RegisterRead maxSpeed = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119 (0x119=281)
+                RegisterRead maxSpeed = Client.ReadTolerant(3, 53530, 1, timeoutMs); // Maksimum RPM: taramada dogrulanan adres
 
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
@@ -1109,8 +1109,8 @@ namespace ModbusScan
                     int actual = (actualSpeed.Data[0] << 8) | actualSpeed.Data[1];
                     int maximum = (maxSpeed.Data[0] << 8) | maxSpeed.Data[1];
                     int rpmValue = (int)Math.Round((double)actual * maximum / 64000.0);
-                    lblEbmRpm.Text = "RPM = " + rpmValue + " (D119 " + maximum + ")";
-                    EbmStatus("RPM=" + rpmValue + " — D010=" + actual + ", D119 maksimum hız=" + maximum);
+                    lblEbmRpm.Text = "RPM = " + rpmValue + " (Max 53530: " + maximum + ")";
+                    EbmStatus("RPM=" + rpmValue + " — D010=" + actual + ", 53530 maksimum hız=" + maximum);
                 }
                 else
                 {
