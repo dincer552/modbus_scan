@@ -105,9 +105,9 @@ namespace ModbusScan
         private GroupBox gbEbm;
         private Button btnScanToggle;
         private Button btnEbmEnter, btnEbmBack, btnEbmStart25, btnEbmSaveAddr;
-        private Button btnEbmSifreGonder, btnEbmSicaklikOku, btnScanConnectToFound;
-        private TextBox txtEbmStatus, txtEbmFoundAddr, txtEbmSifre1, txtEbmSifre2, txtEbmSifre3;
-        private Label lblEbmAddr, lblEbmSicaklikDeger, lblEbmSifre1, lblEbmSifre2, lblEbmSifre3, lblEbmSicaklik;
+        private Button btnEbmSicaklikOku, btnScanConnectToFound;
+        private TextBox txtEbmStatus, txtEbmFoundAddr;
+        private Label lblEbmAddr, lblEbmSicaklikDeger, lblEbmSicaklik;
 
         // Ayar kalıcılığı
         private static string SettingsPath()
@@ -847,38 +847,19 @@ namespace ModbusScan
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
 
-            // Şifre kayıtları (D001/D002/D003): bağlantıdan sonra gönderilir.
-            lblEbmSifre1 = MakeLabel("Şifre D001:", 10, 58);
-            gbEbm.Controls.Add(lblEbmSifre1);
-            txtEbmSifre1 = MakeTextBox("25968", 70, 52, 44);
-            gbEbm.Controls.Add(txtEbmSifre1);
-            lblEbmSifre2 = MakeLabel("D002:", 118, 58);
-            gbEbm.Controls.Add(lblEbmSifre2);
-            txtEbmSifre2 = MakeTextBox("19744", 152, 52, 44);
-            gbEbm.Controls.Add(txtEbmSifre2);
-            lblEbmSifre3 = MakeLabel("D003:", 200, 58);
-            gbEbm.Controls.Add(lblEbmSifre3);
-            txtEbmSifre3 = MakeTextBox("17731", 230, 52, 44);
-            gbEbm.Controls.Add(txtEbmSifre3);
-            btnEbmSifreGonder = new Button();
-            btnEbmSifreGonder.Text = "Şifre Gönder";
-            btnEbmSifreGonder.SetBounds(278, 52, 100, 25);
-            btnEbmSifreGonder.Click += OnEbmSifreGonder;
-            gbEbm.Controls.Add(btnEbmSifreGonder);
-
-            // D016 motor sıcaklığı okuma.
-            lblEbmSicaklik = MakeLabel("Motor Sıcaklığı (D016):", 10, 90);
+            // D016 motor sicakligi okuma.
+            lblEbmSicaklik = MakeLabel("Motor Sicakligi (D016):", 10, 58);
             gbEbm.Controls.Add(lblEbmSicaklik);
             btnEbmSicaklikOku = new Button();
-            btnEbmSicaklikOku.Text = "Sıcaklık Oku";
-            btnEbmSicaklikOku.SetBounds(140, 84, 100, 25);
+            btnEbmSicaklikOku.Text = "Sicaklik Oku";
+            btnEbmSicaklikOku.SetBounds(140, 52, 100, 25);
             btnEbmSicaklikOku.Click += OnEbmSicaklikOku;
             gbEbm.Controls.Add(btnEbmSicaklikOku);
-            lblEbmSicaklikDeger = MakeLabel("-", 245, 90);
+            lblEbmSicaklikDeger = MakeLabel("-", 245, 58);
             gbEbm.Controls.Add(lblEbmSicaklikDeger);
 
             txtEbmStatus = new TextBox();
-            txtEbmStatus.SetBounds(10, 114, 462, 54);
+            txtEbmStatus.SetBounds(10, 86, 462, 52);
             txtEbmStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             txtEbmStatus.Multiline = true;
             txtEbmStatus.ReadOnly = true;
@@ -1059,33 +1040,6 @@ namespace ModbusScan
             catch (Exception ex)
             {
                 EbmStatus("Kaydetme hatası: " + ex.Message);
-            }
-        }
-
-        private void OnEbmSifreGonder(object sender, EventArgs e)
-        {
-            if (Client == null || !Client.IsConnected) { EbmStatus("Bağlantı yok."); return; }
-            int timeoutMs = EbmTimeoutMs();
-            try
-            {
-                int d001, d002, d003;
-                if (!int.TryParse(txtEbmSifre1.Text.Trim(), out d001) ||
-                    !int.TryParse(txtEbmSifre2.Text.Trim(), out d002) ||
-                    !int.TryParse(txtEbmSifre3.Text.Trim(), out d003))
-                {
-                    EbmStatus("Şifre değerleri sayısal olmalı.");
-                    return;
-                }
-                EbmWriteReg(1, d001, timeoutMs);   // D001
-                EbmStatus("D001=" + d001 + " yazıldı.");
-                EbmWriteReg(2, d002, timeoutMs);   // D002
-                EbmStatus("D002=" + d002 + " yazıldı.");
-                EbmWriteReg(3, d003, timeoutMs);   // D003
-                EbmStatus("D003=" + d003 + " yazıldı. Şifre gönderildi.");
-            }
-            catch (Exception ex)
-            {
-                EbmStatus("Şifre hatası: " + ex.Message);
             }
         }
 
@@ -1991,6 +1945,21 @@ namespace ModbusScan
                 Log("Bağlandı (" + (rtu ? "RS485" : "TCP") + "): " + Client.Description + " (unit " + unit + ") " + ms + " ms");
                 UpdateConnectionState(true);
                 SaveSettings();
+
+                // Baglantidan sonra EBM sifrelerini sirali olarak gonder (D001/D002/D003).
+                try
+                {
+                    EbmWriteReg(1, 25968, timeoutMs);   // D001
+                    Log("EBM sifre D001=25968 gonderildi.");
+                    EbmWriteReg(2, 19744, timeoutMs);   // D002
+                    Log("EBM sifre D002=19744 gonderildi.");
+                    EbmWriteReg(3, 17731, timeoutMs);   // D003
+                    Log("EBM sifre D003=17731 gonderildi.");
+                }
+                catch (Exception ex)
+                {
+                    Log("EBM sifre hatasi: " + ex.Message);
+                }
             }
             catch (Exception ex)
             {

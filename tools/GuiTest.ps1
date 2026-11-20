@@ -164,6 +164,21 @@ $form = [Activator]::CreateInstance($type)
 (Get-Field $form 'txtUnit').Text = '1'
 (Get-Field $form 'txtTimeout').Text = '2000'
 Invoke-Handler $form 'OnConnect'
+# Baglantidan sonra arka planda gonderilen EBM sifrelerinin (D001/D002/D003) tamamlanmasini bekle,
+# sonra FakeServer test kayitlarini (reg1/2/3) geri yukle.
+$formLog=''; $formPwOk=$false; $fw=0
+while (-not $formPwOk -and $fw -lt 15000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 200
+    $fw+=200
+    $formLog=[string](Get-Field $form 'txtLog').Text
+    if ($formLog -like '*D001=25968 gonderildi*' -and $formLog -like '*D002=19744 gonderildi*' -and $formLog -like '*D003=17731 gonderildi*') { $formPwOk=$true }
+}
+$tcpF = Get-Field $form '_tcp'
+$mF = $tcpF.GetType().GetMethod('WriteSingleRegister')
+$mF.Invoke($tcpF, @([byte]1, 0xF5C3, 2000))
+$mF.Invoke($tcpF, @([byte]2, 0xFFFF, 2000))
+$mF.Invoke($tcpF, @([byte]3, 1234, 2000))
 
 if ((Get-Field $form 'lblStatus').Text -notmatch '127') {
     Write-Host 'HAYIR  test sunucusuna baglanilamadi, testler atlandi.'
@@ -801,6 +816,12 @@ $scan.Show()
 (Get-Field $scan 'txtUnit').Text = '1'
 (Get-Field $scan 'txtTimeout').Text = '2000'
 Invoke-Handler $scan 'OnConnect'
+# Baglantidan sonra otomatik gonderilen EBM sifreleri (D001/D002/D003) FakeServer test kayitlarini bozdu; geri yukle.
+$tcpS = Get-Field $scan '_tcp'
+$mS = $tcpS.GetType().GetMethod('WriteSingleRegister')
+$mS.Invoke($tcpS, @([byte]1, 0xF5C3, 2000))
+$mS.Invoke($tcpS, @([byte]2, 0xFFFF, 2000))
+$mS.Invoke($tcpS, @([byte]3, 1234, 2000))
 (Get-Field $scan 'txtAddress').Text = '0'
 (Get-Field $scan 'txtQuantity').Text = '5'
 Set-Combo $scan 'cmbFunction' 0
@@ -1029,7 +1050,7 @@ Close-Form $setB
 # Sonraki formlar varsayilanlarla baslasin: gecici ayar dosyasini kaldir.
 if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
 
-# --- EBM sifre gonder (D001/D002/D003) + D016 motor sicaklik okuma testi ---
+# --- EBM otomatik sifre gonderme (baglantidan sonra D001/D002/D003) + D016 sicaklik testi ---
 $tst = [Activator]::CreateInstance($type)
 $tst.Show()
 (Get-Field $tst 'cmbMode').SelectedIndex = 0
@@ -1038,15 +1059,28 @@ $tst.Show()
 (Get-Field $tst 'txtUnit').Text = '1'
 (Get-Field $tst 'txtTimeout').Text = '2000'
 Invoke-Handler $tst 'OnConnect'
+# Baglantidan sonra sifreler arka planda gonderilir; logdaki mesajlari bekle.
+$tstLog = ''
+$pwOk = $false
+$waited = 0
+while (-not $pwOk -and $waited -lt 15000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 200
+    $waited += 200
+    $tstLog = [string](Get-Field $tst 'txtLog').Text
+    if ($tstLog -like '*D001=25968 gonderildi*' -and $tstLog -like '*D002=19744 gonderildi*' -and $tstLog -like '*D003=17731 gonderildi*') { $pwOk = $true }
+}
+Assert $pwOk 'EBM sifreleri baglantidan sonra otomatik gonderildi (D001/D002/D003)' ('log=' + $tstLog)
 Invoke-Handler $tst 'OnEbmEnter'
-(Get-Field $tst 'txtEbmSifre1').Text = '25968'
-(Get-Field $tst 'txtEbmSifre2').Text = '19744'
-(Get-Field $tst 'txtEbmSifre3').Text = '17731'
-Invoke-Handler $tst 'OnEbmSifreGonder'
-$tstS1 = [string](Get-Field $tst 'txtEbmStatus').Text
-Assert ($tstS1 -like '*D003=17731*') 'EBM sifre D001/D002/D003 gonderildi' ('durum=' + $tstS1)
 Invoke-Handler $tst 'OnEbmSicaklikOku'
-$tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
+$tstS2 = ''
+$waited = 0
+while ($tstS2 -notlike '*D016*' -and $waited -lt 10000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 200
+    $waited += 200
+    $tstS2 = [string](Get-Field $tst 'txtEbmStatus').Text
+}
 Assert ($tstS2 -like '*D016*') 'EBM D016 motor sicakligi okundu' ('durum=' + $tstS2)
 # FakeServer kayitlarini geri yukle (bir sonraki calistirma icin bozulmasin).
 $tcpT = Get-Field $tst '_tcp'

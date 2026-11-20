@@ -131,11 +131,11 @@ Son kullandığın bağlantı ve okuma ayarları kapanışta (ve her başarılı
 Okuma kutusunun altındaki **EBM Adresleme** düğmesi paneli açar. Akış, ebm-papst MODBUS dokümanındaki register haritasına göredir (adresler onluk PDU karşılıklarıyla):
 
 1. Panel açılınca mevcut fan adresi **D100** (256) okunur ve adres kutusuna yazılır.
-2. **%25 Start**: **D101** (257) = 1 (setpoint kaynağı RS485/Modbus), **D00F** (15) = 1 (Enable / çalıştır) ve **D001** (1) = 16000 (16000/64000 = %25) yazılır; fan dönmeye başlar. Anlık hız **D008** (8) okunup panele yazılır. Fanı **gözle kontrol et**.
+2. **%25 Start**: **D101** (257) = 1 (setpoint kaynağı RS485/Modbus), **D00F** (15) = 1 (Enable / çalıştır) ve **D001** (1) = 16000 (16000/64000 = %25) yazılır; fan dönmeye başlar. Anlık hız **D008** (8) okunup panele yazılır. Bağlantı kurulduktan sonra program **D001/D002/D003** kayıtlarına fabrika şifrelerini (25968 / 19744 / 17731) arka planda otomatik gönderir; bu işlem sizin ekstra bir işlem gerektirmez. Fanı **gözle kontrol et**.
 3. Dönüyorsa adres kutusuna yeni adresi (1..247) gir ve **Kaydet + Bitir**'e bas: **D100** = adres, **D00C** (12) = 0 (adresleme kapalı, adres kalıcılaşır), **D101** = 1, **D001** = 0 (fan durur). Adres geri okunarak doğrulanır; EBM register tanımları Tanım sütununa kaydedilir ve panel kapanır.
 4. **Geri Dön**: kaydetmeden çıkar; fanı durdurmak için D001 = 0 yazar.
 
-Notlar: EBM fanlar **RS485 (RTU)** üzerinden adreslenir; TCP modunda denenebilir ama gerçek fan beklenmez. Fanın EEPROM ömrü için D001'i sürekli yazmaktan kaçın (dokümanda ~100.000 yazma sınırı uyarısı vardır). EBM telegram sınırı nedeniyle okumalar tek register yapılır. **Yazma işlemleri yalnızca senin başlattığın bağlantıya gider**; testler sahte sunucuya karşı koşar.
+Notlar: EBM fanlar **RS485 (RTU)** üzerinden adreslenir; TCP modunda denenebilir ama gerçek fan beklenmez. Fanın EEPROM ömrü için D001'i sürekli yazmaktan kaçın (dokümanda ~100.000 yazma sınırı uyarısı vardır). EBM telegram sınırı nedeniyle okumalar tek register yapılır. Panelden **D016 motor sıcaklığı** okunabilir. **Yazma işlemleri yalnızca senin başlattığın bağlantıya gider**; testler sahte sunucuya karşı koşar.
 
 ## Hücreye çift tıkla → yaz
 
