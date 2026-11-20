@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Yayin surumu (v yazmadan, ornek: 0.8.0)'
+        description: 'Yayin surumu (v yazmadan, ornek: 0.8.1)'
         required: true
-        default: '0.8.0'
+        default: '0.8.1'
         type: string
 
 permissions:
@@ -36,12 +36,19 @@ jobs:
         with:
           script: |
             const tag = process.env.RELEASE_TAG;
-            await github.rest.git.createRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: `refs/tags/${tag}`,
-              sha: context.sha
-            });
+            try {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${tag}`,
+                sha: context.sha
+              });
+            } catch (error) {
+              if (error.status === 422) {
+                throw new Error(` ${tag} etiketi zaten mevcut. Yeni bir sürüm numarası girin.`);
+              }
+              throw error;
+            }
 
       - name: Etiketlenen kaynak kodu al
         uses: actions/checkout@v4
