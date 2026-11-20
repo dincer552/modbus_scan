@@ -1086,9 +1086,10 @@ namespace ModbusScan
 
                 EbmStatus("Fan bağlantısı kuruldu: ID " + unit + ". D016 ve D119 okunuyor...");
                 int timeoutMs = EbmTimeoutMs();
-                RegisterRead temp = Client.ReadTolerant(3, 16, 1, timeoutMs);  // D016
-                RegisterRead actualSpeed = Client.ReadTolerant(3, 10, 1, timeoutMs); // D010
-                RegisterRead maxSpeed = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119
+                // EBM D-noktaları onaltılık: D016=0x16=22, D010=0x10=16, D119=0x119=281
+                RegisterRead temp = Client.ReadTolerant(3, 22, 1, timeoutMs);  // D016 (0x16=22)
+                RegisterRead actualSpeed = Client.ReadTolerant(3, 16, 1, timeoutMs); // D010 (0x10=16)
+                RegisterRead maxSpeed = Client.ReadTolerant(3, 281, 1, timeoutMs); // D119 (0x119=281)
 
                 if (temp != null && temp.Quantity >= 1 && !temp.Failed(0))
                 {
@@ -1129,7 +1130,7 @@ namespace ModbusScan
             int timeoutMs = EbmTimeoutMs();
             try
             {
-                RegisterRead r = Client.ReadTolerant(3, 16, 1, timeoutMs);
+                RegisterRead r = Client.ReadTolerant(3, 22, 1, timeoutMs); // D016 (0x16=22)
                 if (r != null && r.Quantity >= 1 && !r.Failed(0))
                 {
                     int value = (r.Data[0] << 8) | r.Data[1];
