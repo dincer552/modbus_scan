@@ -847,9 +847,7 @@ namespace ModbusScan
             btnEbmBack.Click += OnEbmBack;
             gbEbm.Controls.Add(btnEbmBack);
 
-            // D016 motor sicakligi okuma.
-            lblEbmSicaklik = MakeLabel("Motor Sicakligi (D016):", 10, 58);
-            gbEbm.Controls.Add(lblEbmSicaklik);
+            // Bulunan fana baglanip D016 sicaklik ve D119 RPM bilgisini oku.
             btnEbmSicaklikOku = new Button();
             btnEbmSicaklikOku.Text = "Bağlan";
             btnEbmSicaklikOku.SetBounds(10, 52, 90, 25);
